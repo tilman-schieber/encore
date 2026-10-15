@@ -5,10 +5,11 @@ import { makeRng } from '../../src/rng';
 import { makeSong } from '../../src/song';
 import { STARTERS } from '../../src/game';
 
-const runs = Number(process.argv[2] ?? 8);
-const mode = (process.argv[3] ?? 'set') as 'set' | 'endless';
+const args = process.argv.slice(2).filter((a) => !a.startsWith('--'));
+const runs = Number(args[0] ?? 8);
+const mode = (args[1] ?? 'set') as 'set' | 'endless';
 const cap = 60 * 60 * (mode === 'set' ? 11 : 20);
-if (process.argv[4]) tune(Number(process.argv[4]), Number(process.argv[5]));
+if (args[2]) tune(Number(args[2]), Number(args[3]));
 const brief = process.argv.includes('--brief');
 for (let seed = 1; seed <= runs; seed++) {
   const w = new World({ rng: makeRng(seed), song: makeSong(seed), mode, start: STARTERS[seed % STARTERS.length] });
