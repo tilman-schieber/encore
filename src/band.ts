@@ -29,7 +29,7 @@ export const INSTRUMENTS: InstDef[] = [
     id: 'snare',
     name: 'SNARE',
     color: '#fcfcfc',
-    levels: ['SHOTS AT THE TWO NEAREST', 'A GHOST NOTE', 'THREE TARGETS AT ONCE', 'SHOTS GO THROUGH', 'A ROLL TO END THE BAR'],
+    levels: ['SHOTS AT THE TWO NEAREST', 'A GHOST NOTE', 'THREE TARGETS AT ONCE', 'SHOTS GO FURTHER THROUGH', 'A ROLL TO END THE BAR'],
   },
   {
     id: 'hats',
@@ -65,7 +65,7 @@ export const INSTRUMENTS: InstDef[] = [
     id: 'crash',
     name: 'CRASH',
     color: '#fca044',
-    levels: ['HITS ALL ON SCREEN, EVERY 4 BARS', 'HARDER', 'EVERY 2 BARS', 'HARDER', 'EVERY BAR'],
+    levels: ['HITS ALL ON SCREEN, EVERY 4 BARS', 'HARDER', 'EVERY 2 BARS', 'HARDER', 'HARDER STILL'],
   },
 ];
 
@@ -99,7 +99,7 @@ const DRUMS: Record<'kick' | 'snare' | 'hats' | 'bass' | 'pad', number[][]> = {
   pad: [[0, 8], [0, 4, 8, 12], [0, 4, 8, 12], [0, 4, 8, 12], [0, 4, 8, 12]],
 };
 const ARP_EVERY = [2, 2, 2, 1, 1];
-const CRASH_EVERY = [4, 4, 2, 2, 1];
+const CRASH_EVERY = [4, 4, 2, 2, 2];
 
 /**
  * How many shots an instrument at a level fires on a step of the song (0: it is silent).
@@ -151,21 +151,21 @@ export function stats(id: InstId, lv: number): Stats {
   const i = lv - 1;
   switch (id) {
     case 'kick':
-      return { dmg: [11, 12, 16, 17, 18][i], area: [34, 35, 40, 41, 43][i], count: 1, pierce: Infinity, speed: 0 };
+      return { dmg: [16, 18, 22, 25, 28][i], area: [38, 40, 44, 46, 50][i], count: 1, pierce: Infinity, speed: 0 };
     case 'snare':
-      return { dmg: [15, 16, 17, 19, 21][i], area: 3, count: lv >= 3 ? 3 : 2, pierce: lv >= 4 ? 3 : 1, speed: 4.2 };
+      return { dmg: [20, 22, 24, 26, 28][i], area: 3, count: lv >= 3 ? 3 : 2, pierce: lv >= 4 ? 4 : 2, speed: 4.2 };
     case 'hats':
-      return { dmg: [6, 6, 7, 9, 10][i], area: 2, count: lv >= 5 ? 5 : lv >= 2 ? 3 : 1, pierce: 1, speed: 5 };
+      return { dmg: [11, 11, 12, 15, 17][i], area: 2, count: lv >= 5 ? 5 : lv >= 2 ? 3 : 1, pierce: 1, speed: 5 };
     case 'bass':
-      return { dmg: [28, 30, 40, 42, 44][i], area: [12, 12, 15, 15, 16][i], count: 1, pierce: Infinity, speed: 1.5 };
+      return { dmg: [7, 8, 9, 10, 12][i], area: [12, 12, 15, 15, 16][i], count: 1, pierce: Infinity, speed: 1.5 };
     case 'lead':
-      return { dmg: [16, 21, 22, 23, 25][i], area: 3, count: 1, pierce: lv >= 4 ? 2 : 1, speed: 2.4 };
+      return { dmg: [30, 38, 38, 40, 42][i], area: 3, count: 1, pierce: lv >= 4 ? 2 : 1, speed: 2.4 };
     case 'arp':
-      return { dmg: [10, 11, 12, 13, 15][i], area: lv >= 5 ? 38 : 30, count: lv + 1, pierce: Infinity, speed: 0 };
+      return { dmg: [14, 15, 16, 17, 19][i], area: lv >= 5 ? 40 : 34, count: lv + 1, pierce: Infinity, speed: 0 };
     case 'pad':
-      return { dmg: [6, 7, 8, 11, 12][i], area: [32, 34, 42, 44, 54][i], count: 1, pierce: Infinity, speed: 0 };
+      return { dmg: [9, 11, 14, 18, 22][i], area: [32, 34, 42, 44, 54][i], count: 1, pierce: Infinity, speed: 0 };
     case 'crash':
-      return { dmg: [22, 34, 34, 48, 56][i], area: 0, count: 1, pierce: Infinity, speed: 0 };
+      return { dmg: [14, 20, 20, 26, 30][i], area: 0, count: 1, pierce: Infinity, speed: 0 };
   }
 }
 

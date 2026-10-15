@@ -96,4 +96,6 @@ npm run build
 
 Add `?debug` to the URL for debug mode: in play, L levels up, T jumps a minute ahead, B skips to THE SILENCE and I heals. Games in debug mode don't go into the high scores.
 
-`npm run playtest` has the title screen's demo busker play whole runs headless and prints how far each got; `npm run playtest:boss` sets a built-up busker against THE SILENCE.
+`npm run playtest -- [runs] [set|endless]` has a bot busker play whole runs headless. It picks cards like a player (`--first` or `--random` for dumber picks) and prints, for each run, its level by the minute, its lowest health, how long THE SILENCE lasted, and which instruments did the damage; `--brief` keeps it to one line a run. Two more numbers after the mode try another curve for enemy health (linear and square terms a minute).
+
+`npm run playtest:boss` sets a built-up busker against THE SILENCE alone, and `npm run playtest:bench -- [minute]` plays each instrument alone at each level and prints the damage it lands in a minute.

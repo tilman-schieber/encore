@@ -29,7 +29,7 @@ export const KINDS: Record<EnemyKind, KindDef> = {
   heckler: { hp: 20, speed: 0.5, dmg: 8, r: 5, xp: 3, pts: 30 },
   feedback: { hp: 26, speed: 0.42, dmg: 15, r: 5, xp: 3, pts: 30 },
   neighbor: { hp: 1100, speed: 0.4, dmg: 20, r: 11, xp: 0, pts: 2000, boss: true },
-  silence: { hp: 12000, speed: 0.3, dmg: 30, r: 18, xp: 0, pts: 20000, boss: true },
+  silence: { hp: 20000, speed: 0.3, dmg: 30, r: 18, xp: 0, pts: 20000, boss: true },
 };
 
 export interface Enemy {
@@ -183,8 +183,10 @@ const MAX_GEMS = 260;
 const MAX_PARTICLES = 320;
 const PLAYER_R = 4;
 const BASE_SPEED = 1.05;
-const PULL = 20;
+const PULL = 28;
 const IFRAMES = 30;
+/** Frames THE SILENCE fights before it grows angry. */
+const SILENCE_PATIENCE = 75 * 60;
 /** Enemies further than this from the player are moved back round in front of them. */
 const LEASH = 300;
 const SPAWN_R = 178;
@@ -193,8 +195,8 @@ const ECHO_STEPS = 3;
 const ECHO_VOL = [0, 0.3, 0.45, 0.6];
 const GRID = 24;
 /** How the Hush toughen by the minute. */
-export let HP_LINEAR = 0.5;
-export let HP_SQUARE = 0.1;
+export let HP_LINEAR = 1.0;
+export let HP_SQUARE = 0.25;
 export function tune(lin: number, sq: number) {
   HP_LINEAR = lin;
   HP_SQUARE = sq;
@@ -255,6 +257,9 @@ export class World {
 
   score = 0;
   kills = 0;
+  /** For the playtests: damage that landed, by instrument, and damage taken, by what dealt it. */
+  dealt: Partial<Record<InstId, number>> = {};
+  taken: Partial<Record<EnemyKind | BulletKind, number>> = {};
   /** The boss on screen, for its health bar. */
   boss: Enemy | null = null;
   /** SET only: THE SILENCE has been beaten. */
@@ -444,7 +449,7 @@ export class World {
       case 'kick': {
         this.rings.push({ x: px, y: py, r: 4, max: area, life: 12, color: '#f83800' });
         for (const e of this.near(px, py, area + 12))
-          if (Math.hypot(e.x - px, e.y - py) < area + e.r) this.hurt(e, dmg, 3);
+          if (Math.hypot(e.x - px, e.y - py) < area + e.r) this.hurt(e, dmg, 3, id);
         break;
       }
       case 'snare': {
@@ -479,24 +484,24 @@ export class World {
       }
       case 'arp': {
         const r = area;
-        const reach = 7 * this.areaMult;
+        const reach = 9 * this.areaMult;
         for (let k = 0; k < st.count; k++) {
           const a = this.orbit + (k * Math.PI * 2) / st.count;
           const ox = px + Math.cos(a) * r, oy = py + Math.sin(a) * r;
-          for (const e of this.near(ox, oy, reach + 12)) if (Math.hypot(e.x - ox, e.y - oy) < reach + e.r) this.hurt(e, dmg, 1);
+          for (const e of this.near(ox, oy, reach + 12)) if (Math.hypot(e.x - ox, e.y - oy) < reach + e.r) this.hurt(e, dmg, 1, id);
         }
         break;
       }
       case 'pad': {
         this.rings.push({ x: px, y: py, r: area, max: area, life: 10, color: '#f878f8' });
-        for (const e of this.near(px, py, area + 12)) if (Math.hypot(e.x - px, e.y - py) < area + e.r) this.hurt(e, dmg, 0);
+        for (const e of this.near(px, py, area + 12)) if (Math.hypot(e.x - px, e.y - py) < area + e.r) this.hurt(e, dmg, 0, id);
         break;
       }
       case 'crash': {
         this.flash = 6;
         this.shake = 6;
         this.rings.push({ x: px, y: py, r: 8, max: 180, life: 18, color: '#fca044' });
-        for (const e of this.enemies) if (Math.abs(e.x - px) < W / 2 + 8 && Math.abs(e.y - py) < H / 2 + 8) this.hurt(e, dmg, 2);
+        for (const e of this.enemies) if (Math.abs(e.x - px) < W / 2 + 8 && Math.abs(e.y - py) < H / 2 + 8) this.hurt(e, dmg, 2, id);
         this.bullets = this.bullets.filter((b) => Math.abs(b.x - px) > W / 2 || Math.abs(b.y - py) > H / 2);
         break;
       }
@@ -602,7 +607,7 @@ export class World {
     const m = t / 60;
     this.events(t);
     const silence = this.boss?.kind === 'silence';
-    const target = Math.min(MAX_ENEMIES, Math.floor((10 + 18 * m + 3.2 * m * m) * (silence ? 0.5 : 1)));
+    const target = Math.min(MAX_ENEMIES, Math.floor((10 + 18 * m + 3.2 * m * m) * (silence ? 0 : 1)));
     const alive = this.enemies.length;
     if (alive >= target) return;
     this.spawnAcc += Math.max(0.05, (target - alive) / 40);
@@ -656,13 +661,18 @@ export class World {
     once('r3', 560, ring('plug', 20));
     if (this.mode === 'set' && t >= SET_FRAMES / 60 && !this.done.has('silence')) {
       this.done.add('silence');
-      this.warn('THE SILENCE');
-      this.spawn('silence', ...this.offscreen(-Math.PI / 2));
+      this.silence();
     }
     if (this.mode === 'endless') once('s', 599.9, () => {
-      this.warn('THE SILENCE');
-      this.spawn('silence', ...this.offscreen(-Math.PI / 2));
+      this.silence();
     });
+  }
+
+  /** THE SILENCE comes, and the Hush out of reach fall quiet and go. */
+  private silence() {
+    this.warn('THE SILENCE');
+    this.spawn('silence', ...this.offscreen(-Math.PI / 2));
+    this.enemies = this.enemies.filter((e) => KINDS[e.kind].boss || Math.hypot(e.x - this.px, e.y - this.py) < 90);
   }
 
   private warn(text: string) {
@@ -754,12 +764,17 @@ export class World {
   /** THE SILENCE: rings of rests, then a spiral, and it calls the Hush to it. */
   private stepSilence(e: Enemy) {
     const half = e.hp < e.maxHp / 2;
-    if (e.t % (half ? 90 : 130) === 0) {
-      const n = half ? 22 : 16;
+    // It won't wait for ever: after a while it grows faster and louder.
+    const angry = e.t > SILENCE_PATIENCE;
+    if (e.t === SILENCE_PATIENCE) this.warn('THE SILENCE GROWS');
+    // And keeps on growing, till it catches you.
+    if (angry && e.t % 1200 === 0) e.speed += 0.2;
+    if (e.t % (angry ? 60 : half ? 90 : 130) === 0) {
+      const n = angry ? 28 : half ? 22 : 16;
       for (let k = 0; k < n; k++) this.bullet('rest', e.x, e.y, (k / n) * Math.PI * 2 + e.t * 0.01, 1.1, 4, 14);
       this.sounds.push('slam');
     }
-    if (half && e.t % 8 === 0) this.bullet('rest', e.x, e.y, e.t * 0.09, 1.4, 4, 12);
+    if ((half || angry) && e.t % (angry ? 5 : 8) === 0) this.bullet('rest', e.x, e.y, e.t * 0.09, 1.4, 4, 12);
     if (e.t % 600 === 300) {
       for (let k = 0; k < 10; k++) {
         const a = (k / 10) * Math.PI * 2;
@@ -791,8 +806,9 @@ export class World {
   }
 
   /** Damage, a white flash and a shove; at zero the enemy bursts into notes. */
-  private hurt(e: Enemy, dmg: number, knock: number) {
+  private hurt(e: Enemy, dmg: number, knock: number, src?: InstId) {
     if (e.hp <= 0) return;
+    if (src) this.dealt[src] = (this.dealt[src] ?? 0) + Math.min(dmg, e.hp);
     e.hp -= dmg;
     e.flash = 5;
     if (knock && !KINDS[e.kind].boss) {
@@ -829,8 +845,13 @@ export class World {
 
   private dropGem(x: number, y: number, value: number) {
     if (this.gems.length >= MAX_GEMS) {
-      // Too many on the ground: the value joins one of them instead.
-      this.gems[Math.floor(this.rng() * this.gems.length)].value += value;
+      // Too many on the ground: the one furthest away joins this one, so the notes move your way, not off.
+      let far = this.gems[0], best = -1;
+      for (const g of this.gems) {
+        const d = (g.x - this.px) ** 2 + (g.y - this.py) ** 2;
+        if (d > best && !g.pulled) (best = d), (far = g);
+      }
+      Object.assign(far, { x, y, value: far.value + value, v: 0 });
       return;
     }
     this.gems.push({ x, y, value, pulled: false, v: 0 });
@@ -866,7 +887,7 @@ export class World {
       for (const e of this.near(s.x, s.y, s.r + 12)) {
         if (s.hit.has(e.id) || Math.hypot(e.x - s.x, e.y - s.y) > s.r + e.r) continue;
         s.hit.add(e.id);
-        this.hurt(e, s.dmg, s.kind === 'wave' ? 2 : 1);
+        this.hurt(e, s.dmg, s.kind === 'wave' ? 2 : 1, s.inst);
         if (s.hit.size >= s.pierce) {
           s.life = 0;
           break;
@@ -883,7 +904,7 @@ export class World {
       b.life--;
       if (Math.hypot(b.x - this.px, b.y - this.py) < b.r + PLAYER_R) {
         b.life = 0;
-        this.damagePlayer(b.dmg);
+        this.damagePlayer(b.dmg, b.kind);
       }
     }
     this.bullets = this.bullets.filter((b) => b.life > 0);
@@ -940,13 +961,14 @@ export class World {
     if (this.iframes > 0) return;
     for (const e of this.near(this.px, this.py, 30))
       if (Math.hypot(e.x - this.px, e.y - this.py) < e.r + PLAYER_R) {
-        this.damagePlayer(e.dmg);
+        this.damagePlayer(e.dmg, e.kind);
         return;
       }
   }
 
-  private damagePlayer(dmg: number) {
+  private damagePlayer(dmg: number, src: EnemyKind | BulletKind) {
     if (this.iframes > 0 || this.state !== 'play') return;
+    this.taken[src] = (this.taken[src] ?? 0) + dmg;
     this.hp -= dmg;
     this.iframes = IFRAMES;
     this.shake = Math.max(this.shake, 6);
@@ -1022,13 +1044,15 @@ export class World {
 export function autopilot(w: World): Controls {
   let ax = 0, ay = 0;
   // With a KICK or a PAD it lets the crowd come into reach.
-  const reach = Math.max(w.instLevel('kick') ? 34 * w.areaMult : 0, w.padRadius);
+  const reach = Math.max(w.instLevel('kick') ? 38 * w.areaMult : 0, w.instLevel('arp') ? 30 * w.areaMult : 0, w.padRadius);
   const keep = reach ? Math.max(24, reach - 6) : 46;
+  // Healthy, it steps in to the boss so short-range parts can reach it.
+  const bossKeep = w.hp > w.maxHp * 0.5 ? Math.max(44, reach + 14) : 70;
   for (const e of w.enemies) {
     const dx = w.px - e.x, dy = w.py - e.y;
     const d2 = dx * dx + dy * dy;
     const boss = KINDS[e.kind].boss;
-    if (d2 > (boss ? 70 * 70 : keep * keep)) continue;
+    if (d2 > (boss ? bossKeep * bossKeep : keep * keep)) continue;
     const k = (boss ? 4 : 1) / Math.max(30, d2);
     ax += dx * k;
     ay += dy * k;
@@ -1050,10 +1074,42 @@ export function autopilot(w: World): Controls {
   }
   const gl = Math.hypot(gx, gy);
   let dx = ax * 40, dy = ay * 40;
-  if (gl > 0 && danger < 0.2) (dx += (gx / gl) * 0.8), (dy += (gy / gl) * 0.8);
+  // Notes pull less the more danger it is in, but never stop pulling, or a close-range band never levels.
+  const want = 0.8 / (1 + danger * 4);
+  if (gl > 0) (dx += (gx / gl) * want), (dy += (gy / gl) * want);
   // Drift in a slow circle so it isn't cornered.
   dx += Math.cos(w.frames / 300) * 0.3;
   dy += Math.sin(w.frames / 300) * 0.3;
   const l = Math.hypot(dx, dy);
   return l > 0.15 ? { dx: dx / l, dy: dy / l } : { dx: 0, dy: 0 };
+}
+
+/** How the playtest busker picks a card: a band of four early, then levels, with gear that fits. */
+export function pickCard(w: World, cards: Card[]): Card {
+  const area = ['kick', 'pad', 'arp', 'bass'].filter((id) => w.instLevel(id as InstId)).length;
+  const hurt = 1 - w.hp / w.maxHp;
+  const value = (c: Card) => {
+    switch (c.kind) {
+      case 'inst':
+        if (c.lv === 1) return w.instruments.length < 4 ? 40 - 6 * w.instruments.length : 12;
+        return 24 + 4 * c.lv;
+      case 'gear':
+        switch (c.id) {
+          case 'amp': return 26;
+          case 'tempo': return 28;
+          case 'echo': return 24;
+          case 'reverb': return 10 + 5 * area;
+          case 'heart': return 10 + 40 * hurt;
+          case 'encore': return 20;
+          case 'fans': return w.level < 15 ? 16 : 6;
+          case 'sneakers': return 9;
+        }
+        return 0;
+      case 'tea':
+        return 60 * hurt;
+      case 'tips':
+        return 1;
+    }
+  };
+  return cards.reduce((a, b) => (value(b) > value(a) ? b : a));
 }
