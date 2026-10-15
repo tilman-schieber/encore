@@ -3,12 +3,14 @@ import { render, W, H } from './render';
 import { unlockAudio, music } from './audio';
 import { setupTouch, setupStick, TouchButton } from './touch';
 import { loadSprites } from './sprites';
+import { setupHidPad, padAxes } from './hidpad';
 
 const canvas = document.getElementById('screen') as HTMLCanvasElement;
 const ctx = canvas.getContext('2d')!;
 ctx.imageSmoothingEnabled = false;
 
 const touchPanel = setupTouch(onTouch);
+setupHidPad();
 
 function resize() {
   const reserved = touchPanel ? touchPanel.el.offsetHeight + 8 : 0;
@@ -105,7 +107,7 @@ function readPads() {
     if (on(3)) held.add(game.phase === 'title' ? 'scores' : 'ok');
     if (on(9)) held.add('start');
     if (on(8)) held.add('quit');
-    const [x = 0, y = 0] = pad.axes;
+    const [x = 0, y = 0] = padAxes(pad);
     if (Math.hypot(x, y) > 0.2) padStick = { x, y };
     if (on(12) || y < -STICK) held.add('up');
     if (on(13) || y > STICK) held.add('down');
