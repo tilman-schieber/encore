@@ -5,7 +5,7 @@ import { Rng } from 'arcade-kit/rng';
 import { Song, STEPS, LOOP } from './song';
 import {
   InstId, GearId, MAX_LEVEL, MAX_INSTRUMENTS, MAX_GEAR, INSTRUMENTS, GEAR, GEARS, STEP_FRAMES, shots, accent, stats,
-  EDITABLE, editable, basePattern, TRAITS, Trait, INST,
+  editable, basePattern, TRAITS, Trait, INST,
 } from './band';
 
 export const W = 256;
@@ -54,7 +54,7 @@ export interface Enemy {
   /** Knocked back this frame. */
   kx: number;
   ky: number;
-  /** Inside the PAD's chord, or hit by a part locked with the BASS: slowed. */
+  /** Inside the PAD's chord, or hit by a part linked with the BASS: slowed. */
   slow: boolean;
   /** Frames left slowed by a WEIGHT hit, and stopped by a STUN hit. */
   slowT: number;
@@ -84,17 +84,17 @@ export interface Shot {
   target: number;
   /** An echo: drawn fainter. */
   echo: boolean;
-  /** What a hit does besides damage, from a lock. */
+  /** What a hit does besides damage, from a link. */
   fx: HitFx | null;
 }
 
-/** Stun and slow from a lock, in frames. */
+/** Stun and slow from a link, in frames. */
 export interface HitFx {
   stun: number;
   slow: number;
 }
 
-/** A shot to play again later: an ECHO, or a lock with the HATS. */
+/** A shot to play again later: an ECHO, or a link with the HATS. */
 interface Echo {
   at: number;
   id: InstId;
@@ -189,7 +189,7 @@ export type Card =
   | { kind: 'gear'; id: GearId; lv: number }
   | { kind: 'tea' }
   | { kind: 'tips' }
-  | { kind: 'arrange' };
+  | { kind: 'link'; a: InstId; b: InstId };
 
 export type Mode = 'set' | 'endless';
 
@@ -221,10 +221,10 @@ const SPAWN_R = 178;
 /** Echoes come a dotted eighth late. */
 const ECHO_STEPS = 3;
 const ECHO_VOL = [0, 0.3, 0.45, 0.6];
-/** Steps a LOCK card lets you move. */
-export const ARRANGE_MOVES = 2;
-/** Locked steps named over your head after each move. */
-const LOCK_TIPS = 6;
+/** Links you can make in a run. */
+export const MAX_LINKS = 3;
+/** Linked steps named over your head after taking a LINK. */
+const LINK_TIPS = 6;
 /** How near a MUTE has to be to silence its part. */
 export const MUTE_R = 120;
 const GRID = 24;
@@ -278,10 +278,8 @@ export class World {
   orbit = 0;
   /** Shots waiting to play again. */
   private echoes: Echo[] = [];
-  /** Steps moved on the sequencer, per part, in the order made: [from, to]. Replayed on every level's pattern. */
-  moves: Partial<Record<InstId, [number, number][]>> = {};
-  /** Steps still to move, after a REARRANGE card. */
-  movesLeft = 0;
+  /** Pairs of parts linked by LINK cards: on a step both play, each gets the other's trait. */
+  links: [InstId, InstId][] = [];
   /** Hit effects of the shot being fired. */
   private hitFx: HitFx | null = null;
   notes: NoteEvent[] = [];
@@ -337,20 +335,13 @@ export class World {
 
   // ---------- the sequencer ----------
 
-  /** The steps of a bar a part plays, each with the step it was moved from (itself if it wasn't). */
-  pattern(id: InstId, lv = this.instLevel(id)): Map<number, number> {
-    const out = new Map(basePattern(id, lv).map((k) => [k, k] as [number, number]));
-    for (const [from, to] of this.moves[id] ?? []) {
-      const o = out.get(from);
-      if (o === undefined || out.has(to)) continue;
-      out.delete(from);
-      out.set(to, o);
-    }
-    return out;
+  /** The steps of a bar a part with a pattern plays. */
+  pattern(id: InstId, lv = this.instLevel(id)): Set<number> {
+    return new Set(basePattern(id, lv));
   }
 
-  /** Every part you hold that you can rearrange, with its pattern. */
-  patterns(): Map<InstId, Map<number, number>> {
+  /** Every part you hold that plays a pattern, with it. */
+  patterns(): Map<InstId, Set<number>> {
     return new Map(this.instruments.filter((s) => editable(s.id)).map((s) => [s.id, this.pattern(s.id, s.lv)]));
   }
 
@@ -359,24 +350,27 @@ export class World {
     return editable(id) ? this.pattern(id, lv).has(step % STEPS) : shots(id, lv, step, this.song) > 0;
   }
 
-  /** The parts a step of `id` would lock with if it went to `to`: the others playing there (none if `id` plays there already). */
-  lockPartners(id: InstId, to: number, pats = this.patterns()): InstId[] {
-    if (pats.get(id)?.has(to)) return [];
-    return [...pats].filter(([o, p]) => o !== id && p.has(to)).map(([o]) => o);
+  linked(a: InstId, b: InstId) {
+    return this.links.some(([x, y]) => (x === a && y === b) || (x === b && y === a));
   }
 
-  /** Moves a step of a part onto another part's step, locking the two there. */
-  moveStep(id: InstId, from: number, to: number) {
-    const p = this.pattern(id);
-    if (!p.has(from) || !this.lockPartners(id, to).length || this.movesLeft <= 0) return false;
-    (this.moves[id] ??= []).push([from, to]);
-    this.movesLeft--;
-    this.lockTips = LOCK_TIPS;
-    return true;
+  /** Pairs of parts you hold that a LINK card could join. */
+  linkable(): [InstId, InstId][] {
+    if (this.links.length >= MAX_LINKS) return [];
+    const ids = this.instruments.filter((s) => editable(s.id)).map((s) => s.id);
+    const out: [InstId, InstId][] = [];
+    for (let i = 0; i < ids.length; i++) for (let j = i + 1; j < ids.length; j++) if (!this.linked(ids[i], ids[j])) out.push([ids[i], ids[j]]);
+    return out;
   }
 
-  /** Locked steps still to be named over your head after a move, so you see what the lock does. */
-  lockTips = 0;
+  /** Linked steps still to be named over your head after a LINK, so you see what it does. */
+  linkTips = 0;
+
+  /** For ?debug: links two parts you hold. */
+  debugLink() {
+    const pairs = this.linkable();
+    if (pairs.length) this.choose({ kind: 'link', a: pairs[0][0], b: pairs[0][1] }), this.pending++;
+  }
 
   /** For ?debug: a MUTE comes now. */
   debugMute() {
@@ -391,9 +385,9 @@ export class World {
     return out;
   }
 
-  /** On a step of the bar: the traits each part gets from its locks. */
-  locksAt(bar: number, pats = this.patterns(), muted = this.muted()): Map<InstId, Trait[]> {
-    return lockMap(pats, bar, muted);
+  /** On a step of the bar: the traits each part gets from its links. */
+  linksAt(bar: number, pats = this.patterns(), muted = this.muted()): Map<InstId, Trait[]> {
+    return linkMap(this.links, pats, bar, muted);
   }
 
   get dmgMult() {
@@ -442,7 +436,11 @@ export class World {
       for (const d of INSTRUMENTS) if (!this.instLevel(d.id)) pool.push([{ kind: 'inst', id: d.id, lv: 1 }, 1]);
     for (const s of this.gear) if (s.lv < GEARS[s.id].max) pool.push([{ kind: 'gear', id: s.id, lv: s.lv + 1 }, 1]);
     if (this.gear.length < MAX_GEAR) for (const d of GEAR) if (!this.gearLevel(d.id)) pool.push([{ kind: 'gear', id: d.id, lv: 1 }, 0.8]);
-    if (this.instruments.filter((s) => editable(s.id)).length >= 2) pool.push([{ kind: 'arrange' }, 0.9]);
+    const pairs = this.linkable();
+    if (pairs.length) {
+      const [a, b] = pairs[Math.floor(this.rng() * pairs.length)];
+      pool.push([{ kind: 'link', a, b }, 0.9]);
+    }
     const out: Card[] = [];
     while (out.length < 3 && pool.length) {
       const total = pool.reduce((a, [, w]) => a + w, 0);
@@ -471,7 +469,11 @@ export class World {
       }
       if (c.id === 'encore') this.revives++;
     } else if (c.kind === 'tea') this.hp = Math.min(this.maxHp, this.hp + 50);
-    else if (c.kind === 'arrange') this.movesLeft += ARRANGE_MOVES;
+    else if (c.kind === 'link') {
+      if (!this.linked(c.a, c.b)) this.links.push([c.a, c.b]);
+      this.linkTips = LINK_TIPS;
+      this.popup(`${INST[c.a].name} + ${INST[c.b].name} LINKED`, '#f8d838');
+    }
     else this.addScore(1000);
   }
 
@@ -529,20 +531,19 @@ export class World {
     const bar = this.step % STEPS;
     const pats = this.patterns();
     const muted = this.muted();
-    const locks = lockMap(pats, bar, muted);
+    const links = linkMap(this.links, pats, bar, muted);
     const echo = this.gearLevel('echo');
-    if (fire && locks.size) this.lockFlash(locks);
+    if (fire && links.size) this.linkFlash(links);
     for (const s of this.instruments) {
       // A MUTE near you: that part sits out.
       if (muted.has(s.id)) continue;
       const pat = pats.get(s.id);
       const n = pat ? (pat.has(bar) ? 1 : 0) : shots(s.id, s.lv, this.step, this.song);
       if (!n) continue;
-      // A moved step keeps the accent of the step it came from.
-      const vol = accent(s.id, pat?.get(bar) ?? bar);
+      const vol = accent(s.id, bar);
       this.notes.push({ inst: s.id, step: this.step, lv: s.lv, count: n, vol });
       if (!fire) continue;
-      const traits = locks.get(s.id) ?? [];
+      const traits = links.get(s.id) ?? [];
       this.fire(s.id, s.lv, n, vol < 1 ? 0.7 : 1, false, traits);
       const rest = traits.filter((t) => t !== 'double');
       if (rest.length < traits.length) this.echoes.push({ at: this.step + 1, id: s.id, lv: s.lv, k: 0.6, n, step: this.step, traits: rest });
@@ -562,7 +563,7 @@ export class World {
   private fire(id: InstId, lv: number, n: number, scale: number, echo = false, traits: Trait[] = []) {
     const st = stats(id, lv);
     const has = (t: Trait) => traits.includes(t);
-    // Locks: PUNCH hits harder, WIDE is bigger, STUN and WEIGHT stop and slow what they hit.
+    // Links: PUNCH hits harder, WIDE is bigger, STUN and WEIGHT stop and slow what they hit.
     const dmg = st.dmg * this.dmgMult * scale * (has('punch') ? 1.5 : 1);
     const wide = has('wide') ? 1.5 : 1;
     const area = st.area * this.areaMult * wide;
@@ -573,13 +574,13 @@ export class World {
     this.hitFx = null;
   }
 
-  /** A locked step playing: a white ring and a chime, and for a while after a move its traits by name. */
-  private lockFlash(locks: Map<InstId, Trait[]>) {
+  /** A linked step playing: a white ring and a chime, and for a while after a LINK its traits by name. */
+  private linkFlash(links: Map<InstId, Trait[]>) {
     this.rings.push({ x: this.px, y: this.py, r: 3, max: 16, life: 8, color: '#fcfcfc' });
-    this.sounds.push('lock');
-    if (this.lockTips <= 0) return;
-    this.lockTips--;
-    const traits = [...new Set([...locks.values()].flat())];
+    this.sounds.push('link');
+    if (this.linkTips <= 0) return;
+    this.linkTips--;
+    const traits = [...new Set([...links.values()].flat())];
     this.popup(traits.map((t) => Object.values(TRAITS).find((d) => d!.trait === t)!.name).join(' + '), '#fcfcfc');
   }
 
@@ -1299,32 +1300,34 @@ export function pickCard(w: World, cards: Card[]): Card {
         return 60 * hurt;
       case 'tips':
         return 1;
-      case 'arrange':
-        // Worth more the more parts there are to lock.
-        return 8 * w.instruments.filter((s) => editable(s.id)).length - 6;
+      case 'link':
+        return linkValue(w, c.a, c.b);
     }
   };
   return cards.reduce((a, b) => (value(b) > value(a) ? b : a));
 }
 
-/** On a step of the bar: the traits each part gets from its locks (a moved step on another part's step). */
-export function lockMap(pats: Map<InstId, Map<number, number>>, bar: number, muted: Set<InstId>): Map<InstId, Trait[]> {
+/** On a step of the bar: the traits each part gets from its links (a linked pair both playing). */
+export function linkMap(links: [InstId, InstId][], pats: Map<InstId, Set<number>>, bar: number, muted: Set<InstId>): Map<InstId, Trait[]> {
   const out = new Map<InstId, Trait[]>();
-  const on = [...pats].filter(([id, p]) => p.has(bar) && !muted.has(id));
+  const on = (id: InstId) => !!pats.get(id)?.has(bar) && !muted.has(id);
   const add = (id: InstId, t: Trait) => {
     const list = out.get(id) ?? [];
     if (!list.includes(t)) list.push(t);
     out.set(id, list);
   };
-  for (const [a, pa] of on) {
-    if (pa.get(bar) === bar) continue;
-    for (const [b] of on)
-      if (b !== a) {
-        add(a, TRAITS[b]!.trait);
-        add(b, TRAITS[a]!.trait);
-      }
-  }
+  for (const [a, b] of links)
+    if (on(a) && on(b)) {
+      add(a, TRAITS[b]!.trait);
+      add(b, TRAITS[a]!.trait);
+    }
   return out;
+}
+
+/** The steps of a bar two parts play together. */
+export function sharedSteps(w: World, a: InstId, b: InstId) {
+  const pa = w.pattern(a), pb = w.pattern(b);
+  return [...pa].filter((k) => pb.has(k));
 }
 
 /** What a trait is worth to the playtest busker, by who gets it. */
@@ -1339,37 +1342,8 @@ function traitValue(w: World, id: InstId, t: Trait) {
   }
 }
 
-function lockValue(w: World, pats: Map<InstId, Map<number, number>>) {
-  let v = 0;
-  const none = new Set<InstId>();
-  for (let bar = 0; bar < STEPS; bar++) for (const [id, ts] of lockMap(pats, bar, none)) for (const t of ts) v += traitValue(w, id, t);
-  return v;
-}
-
-/** The playtest busker (and the title demo) rearranging: each move the one that gains the most from locks. */
-export function autoArrange(w: World) {
-  while (w.movesLeft > 0) {
-    const base = lockValue(w, w.patterns());
-    let best: [InstId, number, number] | null = null, gain = 0;
-    for (const id of EDITABLE) {
-      if (!w.instLevel(id)) continue;
-      const pat = w.pattern(id);
-      for (const from of pat.keys())
-        for (let to = 0; to < STEPS; to++) {
-          if (!w.lockPartners(id, to).length) continue;
-          const pats = w.patterns();
-          const p = new Map(pat);
-          p.set(to, p.get(from)!);
-          p.delete(from);
-          pats.set(id, p);
-          const g = lockValue(w, pats) - base;
-          if (g > gain) (gain = g), (best = [id, from, to]);
-        }
-    }
-    if (!best) {
-      w.movesLeft = 0;
-      return;
-    }
-    w.moveStep(...best);
-  }
+/** What a LINK card is worth to the playtest busker: the traits it adds over a bar. */
+function linkValue(w: World, a: InstId, b: InstId) {
+  const n = sharedSteps(w, a, b).length;
+  return Math.min(48, 24 + (n * (traitValue(w, a, TRAITS[b]!.trait) + traitValue(w, b, TRAITS[a]!.trait))) / 2);
 }

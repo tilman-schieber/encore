@@ -33,11 +33,11 @@ Six instruments at most, each up to level 5. A level more is a busier part: more
 
 The sequencer at the bottom left shows the bar now playing: a row per instrument, a lit step for each shot.
 
-### Rearranging and locks
+### Links
 
-A LOCK card lets you move two steps of any part but the LEAD (it plays the tune) and the CRASH (it plays on the bar), and a step can only go onto a step of another part. There the two **lock**: on that step each part gets the other's power, so a SNARE step put on a KICK step makes that kick stun and that snare hit harder. While you hold a step, the places it can go glow in the colour of the part it would lock with. In play, a locked step flashes a white ring and chimes, and for a few beats after a move the powers show over your head. Moved steps stay where you put them as the part levels up. Parts that only happen to share a step, as the KICK and SNARE do, aren't locked. Locked steps are white on the sequencer.
+A LINK card joins two of KICK, SNARE, HATS, BASS, PAD and ARP (the LEAD follows the tune and the CRASH the bar, so they have no power to lend). On every step both play, each part gets the other's power: link the SNARE and the KICK and the kick stuns on the steps they share, and the snare hits harder. The card names the pair, says what each gets and on how many steps a bar, and draws both patterns with the shared steps white. Busy parts like the HATS share many steps with anything, sparse ones like the PAD only a few. Levelling a part up adds steps, so its links get busier too. Three links at most. In play, a linked step flashes a white ring and chimes, and for a few beats after a LINK the powers show over your head. Linked steps blink on the sequencer.
 
-| Part | Lends | On a locked step |
+| Part | Lends | On a linked step |
 | --- | --- | --- |
 | KICK | PUNCH | Half again the damage |
 | SNARE | STUN | Hits stop the Hush short (not bosses) |
@@ -92,7 +92,7 @@ A gamepad works too: stick or d-pad to walk (the stick by how far you push it), 
 
 **D-pad not working on a Mac?** Cheap SNES-style USB pads (DragonRise, `0079:0011`, sold as "USB Gamepad") describe their d-pad in a way Chrome on macOS can't read: it sees the buttons but not the d-pad. Open the game with `?webhid` (https://gh.tschieber.de/encore/?webhid) and click CONNECT GAMEPAD at the top right to read the d-pad over WebHID instead, then press one of the pad's buttons so the browser reports the pad. Chrome remembers the pad after that. Chrome and Edge only, as other browsers have no WebHID. The code is in [arcade-kit](https://github.com/tilman-schieber/arcade-kit)'s `hidpad` module.
 
-On phones, put a finger down anywhere on the screen and drag to walk. Tap a card to take it. To lock, tap a lit step, then a glowing step; tap the bar at the bottom when done.
+On phones, put a finger down anywhere on the screen and drag to walk. Tap a card to take it.
 
 ## Music
 
@@ -110,8 +110,8 @@ npm run dev
 npm run build
 ```
 
-Add `?debug` to the URL for debug mode: in play, L levels up, T jumps a minute ahead, B skips to THE SILENCE, I heals, R opens a LOCK screen and U calls a MUTE. The game is then `window.game` in the console. Games in debug mode don't go into the high scores.
+Add `?debug` to the URL for debug mode: in play, L levels up, T jumps a minute ahead, B skips to THE SILENCE, I heals, K links two parts and U calls a MUTE. The game is then `window.game` in the console. Games in debug mode don't go into the high scores.
 
-`npm run playtest -- [runs] [set|endless]` has a bot busker play whole runs headless. It picks cards like a player (`--first` or `--random` for dumber picks) and prints, for each run, its level by the minute, its lowest health, how long THE SILENCE lasted, and which instruments did the damage; `--brief` keeps it to one line a run. Two more numbers after the mode try another curve for enemy health (linear and square terms a minute); `--no-arrange` never takes a LOCK card, and `--mutes=N` sends a MUTE every N seconds (0: none).
+`npm run playtest -- [runs] [set|endless]` has a bot busker play whole runs headless. It picks cards like a player (`--first` or `--random` for dumber picks) and prints, for each run, its level by the minute, its lowest health, how long THE SILENCE lasted, and which instruments did the damage; `--brief` keeps it to one line a run. Two more numbers after the mode try another curve for enemy health (linear and square terms a minute); `--no-link` never takes a LINK card, and `--mutes=N` sends a MUTE every N seconds (0: none).
 
 `npm run playtest:boss` sets a built-up busker against THE SILENCE alone, and `npm run playtest:bench -- [minute]` plays each instrument alone at each level and prints the damage it lands in a minute.

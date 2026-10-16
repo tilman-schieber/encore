@@ -101,7 +101,7 @@ const DRUMS: Record<'kick' | 'snare' | 'hats' | 'bass' | 'pad', number[][]> = {
 const ARP_EVERY = [2, 2, 2, 1, 1];
 const CRASH_EVERY = [4, 4, 2, 2, 2];
 
-/** The parts you can rearrange on the sequencer; the LEAD follows the tune and the CRASH the bars. */
+/** The parts that play a fixed pattern and can be linked; the LEAD follows the tune and the CRASH the bars. */
 export const EDITABLE: InstId[] = ['kick', 'snare', 'hats', 'bass', 'pad', 'arp'];
 export const editable = (id: InstId) => EDITABLE.includes(id);
 
@@ -111,12 +111,9 @@ export function basePattern(id: InstId, lv: number): number[] {
   return DRUMS[id as keyof typeof DRUMS][lv - 1];
 }
 
-/**
- * A step you moved onto another part's step locks the two: on it, each lends the other its trait.
- * (Parts that only happen to share a step, as the KICK and SNARE do, aren't locked.)
- */
+/** Two parts linked by a LINK card: on every step both play, each lends the other its trait. */
 export type Trait = 'punch' | 'stun' | 'double' | 'weight' | 'warmth' | 'wide';
-/** `does`: what a part that borrows the trait does on the locked step. */
+/** `does`: what a part that borrows the trait does on a linked step. */
 export const TRAITS: Partial<Record<InstId, { trait: Trait; name: string; text: string; does: string }>> = {
   kick: { trait: 'punch', name: 'PUNCH', text: 'HALF AGAIN THE DAMAGE', does: 'HITS HARDER' },
   snare: { trait: 'stun', name: 'STUN', text: 'HITS STOP THE HUSH SHORT', does: 'STUNS' },
@@ -126,8 +123,8 @@ export const TRAITS: Partial<Record<InstId, { trait: Trait; name: string; text: 
   arp: { trait: 'wide', name: 'WIDE', text: 'HALF AGAIN THE SIZE', does: 'GOES WIDER' },
 };
 
-/** What locking `a` onto `b` does, e.g. KICK STUNS, SNARE HITS HARDER. */
-export const lockText = (a: InstId, b: InstId) => `${INST[b].name} ${TRAITS[a]!.does}, ${INST[a].name} ${TRAITS[b]!.does}`;
+/** What linking `a` and `b` does, e.g. KICK STUNS, SNARE HITS HARDER. */
+export const linkText = (a: InstId, b: InstId) => `${INST[b].name} ${TRAITS[a]!.does}, ${INST[a].name} ${TRAITS[b]!.does}`;
 
 /**
  * How many shots an instrument at a level fires on a step of the song (0: it is silent).

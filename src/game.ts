@@ -3,9 +3,8 @@ import { loadTables, saveTables, rankFor, ScoreEntry, Tables, MAX_SCORES, load, 
 import { sfx, music } from './audio';
 import { hashString, makeRng, randomSeed, today } from 'arcade-kit/rng';
 import { makeSong } from './song';
-import { World, Controls, Card, autopilot, autoArrange } from './world';
-import { InstId, INST, STEP_FRAMES, editable, lockText } from './band';
-import { STEPS } from './song';
+import { World, Controls, Card, autopilot } from './world';
+import { InstId, STEP_FRAMES } from './band';
 import { HELP_PAGES } from './help';
 
 export type Action = 'up' | 'down' | 'left' | 'right' | 'ok' | 'start' | 'back' | 'quit' | 'mute' | 'scores';
@@ -21,7 +20,7 @@ export interface Input {
   tap: { x: number; y: number } | null;
 }
 
-export type Phase = 'title' | 'intro' | 'play' | 'levelup' | 'arrange' | 'over' | 'entry' | 'scores' | 'help';
+export type Phase = 'title' | 'intro' | 'play' | 'levelup' | 'over' | 'entry' | 'scores' | 'help';
 
 export interface Settings {
   /** Index into MODES. */
@@ -48,12 +47,6 @@ const DEFAULT_SETTINGS: Settings = { mode: 0, start: 0, daily: false, music: 0, 
 export const INTRO_FRAMES = 110;
 /** A level-up card can't be taken until it has been on screen this long, so held keys don't pick one. */
 const CARD_DELAY = 24;
-/** Where the REARRANGE grid is drawn (render.ts draws it, taps are read from it). */
-export const ARR_X = 24;
-export const ARR_Y = 44;
-export const ARR_CELL = 13;
-export const ARR_ROW = 14;
-export const ARR_DONE_Y = 196;
 
 function loadSettings(): Settings {
   try {
@@ -82,10 +75,6 @@ export class Game {
   attract: World | null = null;
   cards: Card[] = [];
   cardRow = 0;
-  /** The REARRANGE screen: the cursor, and the step picked up (-1: none). */
-  arrRow = 0;
-  arrCol = 0;
-  holding = -1;
 
   tables: Tables = loadTables();
   /** World top 10s from the server; null until loaded or while offline. */
@@ -155,8 +144,6 @@ export class Game {
         return this.stepPlay(input);
       case 'levelup':
         return this.stepLevelUp(input);
-      case 'arrange':
-        return this.stepArrange(input);
       case 'over':
         this.world!.update({ dx: 0, dy: 0 });
         if (++this.timer > 90 && (pressed.has('start') || pressed.has('ok') || input.tap)) {
@@ -195,7 +182,6 @@ export class Game {
       return;
     }
     while (w.pending > 0) w.choose(w.offer()[Math.floor(w.rng() * 3)]);
-    autoArrange(w);
     w.update(autopilot(w));
   }
 
@@ -346,9 +332,10 @@ export class Game {
       }
     }
     if (!take) return;
-    w.choose(this.cards[this.cardRow]);
-    sfx.choose();
-    if (w.movesLeft > 0) return this.arrange();
+    const card = this.cards[this.cardRow];
+    w.choose(card);
+    if (card.kind === 'link') sfx.linked();
+    else sfx.choose();
     this.afterCards();
   }
 
@@ -356,111 +343,6 @@ export class Game {
     if (this.world!.pending > 0) this.levelUp();
     else this.phase = 'play';
   }
-
-  // ---------- rearranging the sequencer ----------
-
-  /** The rows of the REARRANGE screen: the parts you can move. */
-  arrRows(): InstId[] {
-    return this.world!.instruments.filter((s) => editable(s.id)).map((s) => s.id);
-  }
-
-  private arrange() {
-    if (!this.arrRows().length) {
-      this.world!.movesLeft = 0;
-      return this.afterCards();
-    }
-    this.phase = 'arrange';
-    this.timer = 0;
-    this.arrRow = 0;
-    this.arrCol = 0;
-    this.holding = -1;
-    this.banner = null;
-  }
-
-  /** Which cell of the REARRANGE grid a tap is on (see render.ts), or 'done', or null. */
-  static arrAt(x: number, y: number, rows: number): [number, number] | 'done' | null {
-    if (y >= ARR_DONE_Y && y < ARR_DONE_Y + 16) return 'done';
-    const r = Math.floor((y - ARR_Y) / ARR_ROW), c = Math.floor((x - ARR_X) / ARR_CELL);
-    return r >= 0 && r < rows && c >= 0 && c < STEPS ? [r, c] : null;
-  }
-
-  private stepArrange(input: Input) {
-    const { pressed, tap } = input;
-    const w = this.world!;
-    this.timer++;
-    w.idle();
-    this.idleFrames++;
-    this.playNotes(w);
-    if (this.afterArrange) {
-      if (this.timer >= 0) (this.afterArrange = false), this.afterCards();
-      return;
-    }
-    if (this.banner) this.banner.t--;
-    const rows = this.arrRows();
-    const d = (pressed.has('right') ? 1 : 0) - (pressed.has('left') ? 1 : 0);
-    if (d && this.holding >= 0) {
-      // Holding a step, the cursor jumps between the steps where it would lock (and back home).
-      const id = rows[this.arrRow];
-      for (let k = 1; k <= STEPS; k++) {
-        const c = (this.arrCol + d * k + STEPS * 2) % STEPS;
-        if (c === this.holding || w.lockPartners(id, c).length) {
-          this.arrCol = c;
-          break;
-        }
-      }
-      sfx.move();
-    } else if (d) (this.arrCol = (this.arrCol + d + STEPS) % STEPS), sfx.move();
-    // While holding a step it stays in its row.
-    if (this.holding < 0) {
-      if (pressed.has('up')) (this.arrRow = (this.arrRow + rows.length - 1) % rows.length), sfx.move();
-      if (pressed.has('down')) (this.arrRow = (this.arrRow + 1) % rows.length), sfx.move();
-    }
-    let act = this.timer > CARD_DELAY && (pressed.has('ok') || pressed.has('start'));
-    let done = pressed.has('back') && this.holding < 0;
-    if (pressed.has('back') && this.holding >= 0) (this.holding = -1), sfx.move();
-    if (tap && this.timer > CARD_DELAY) {
-      const at = Game.arrAt(tap.x, tap.y, rows.length);
-      if (at === 'done') done = true;
-      else if (at && (this.holding < 0 || at[0] === this.arrRow)) {
-        [this.arrRow, this.arrCol] = at;
-        act = true;
-      }
-    }
-    if (done) {
-      w.movesLeft = 0;
-      sfx.choose();
-      return this.afterCards();
-    }
-    if (!act) return;
-    const id = rows[this.arrRow];
-    const pat = w.pattern(id);
-    if (this.holding < 0) {
-      if (pat.has(this.arrCol)) (this.holding = this.arrCol), sfx.select();
-    } else if (this.arrCol === this.holding) {
-      this.holding = -1;
-      sfx.move();
-    } else {
-      const with_ = w.lockPartners(id, this.arrCol);
-      if (!w.moveStep(id, this.holding, this.arrCol)) return void sfx.move();
-      this.holding = -1;
-      sfx.locked();
-      this.banner = {
-        title: `LOCKED: ${[id, ...with_].map((o) => INST[o].name).join(' + ')}`,
-        text: with_.map((o) => lockText(id, o)).join('. '),
-        t: 150,
-      };
-      if (w.movesLeft <= 0) {
-        // A moment to read what the lock does.
-        this.timer = -90;
-        this.afterArrange = true;
-      }
-    }
-  }
-
-  /** The last move made: back to the street once the pause after it is over. */
-  afterArrange = false;
-  /** What the lock just made does, shown for a while on the LOCK screen. */
-  banner: { title: string; text: string; t: number } | null = null;
 
   private gameOver() {
     const w = this.world!;
@@ -571,7 +453,7 @@ export class Game {
 
   // ---------- debug mode ----------
 
-  /** L levels up, T jumps a minute on, B calls THE SILENCE's time, I heals to full, R rearranges, U calls a MUTE. */
+  /** L levels up, T jumps a minute on, B calls THE SILENCE's time, I heals to full, K links two parts, U calls a MUTE. */
   private debugKeys(typed: string[]) {
     const w = this.world!;
     for (const k of typed) {
@@ -580,11 +462,7 @@ export class Game {
       if (k === 'B') w.frames = Math.max(w.frames, 10 * 3600 - 60);
       if (k === 'I') w.hp = w.maxHp;
       if (k === 'U') w.debugMute();
-      if (k === 'R') {
-        w.movesLeft += 2;
-        this.arrange();
-        return;
-      }
+      if (k === 'K') w.debugLink();
     }
   }
 
