@@ -221,8 +221,10 @@ const SPAWN_R = 178;
 /** Echoes come a dotted eighth late. */
 const ECHO_STEPS = 3;
 const ECHO_VOL = [0, 0.3, 0.45, 0.6];
-/** Steps a REARRANGE card lets you move. */
+/** Steps a LOCK card lets you move. */
 export const ARRANGE_MOVES = 2;
+/** Locked steps named over your head after each move. */
+const LOCK_TIPS = 6;
 /** How near a MUTE has to be to silence its part. */
 export const MUTE_R = 120;
 const GRID = 24;
@@ -357,14 +359,24 @@ export class World {
     return editable(id) ? this.pattern(id, lv).has(step % STEPS) : shots(id, lv, step, this.song) > 0;
   }
 
-  /** Moves a step of a part to an empty one of its row. */
+  /** The parts a step of `id` would lock with if it went to `to`: the others playing there (none if `id` plays there already). */
+  lockPartners(id: InstId, to: number, pats = this.patterns()): InstId[] {
+    if (pats.get(id)?.has(to)) return [];
+    return [...pats].filter(([o, p]) => o !== id && p.has(to)).map(([o]) => o);
+  }
+
+  /** Moves a step of a part onto another part's step, locking the two there. */
   moveStep(id: InstId, from: number, to: number) {
     const p = this.pattern(id);
-    if (!p.has(from) || p.has(to) || this.movesLeft <= 0) return false;
+    if (!p.has(from) || !this.lockPartners(id, to).length || this.movesLeft <= 0) return false;
     (this.moves[id] ??= []).push([from, to]);
     this.movesLeft--;
+    this.lockTips = LOCK_TIPS;
     return true;
   }
+
+  /** Locked steps still to be named over your head after a move, so you see what the lock does. */
+  lockTips = 0;
 
   /** For ?debug: a MUTE comes now. */
   debugMute() {
@@ -519,6 +531,7 @@ export class World {
     const muted = this.muted();
     const locks = lockMap(pats, bar, muted);
     const echo = this.gearLevel('echo');
+    if (fire && locks.size) this.lockFlash(locks);
     for (const s of this.instruments) {
       // A MUTE near you: that part sits out.
       if (muted.has(s.id)) continue;
@@ -558,6 +571,16 @@ export class World {
     if (has('warmth')) this.warmth();
     this.fireAs(id, st, n, dmg, area, wide, echo);
     this.hitFx = null;
+  }
+
+  /** A locked step playing: a white ring and a chime, and for a while after a move its traits by name. */
+  private lockFlash(locks: Map<InstId, Trait[]>) {
+    this.rings.push({ x: this.px, y: this.py, r: 3, max: 16, life: 8, color: '#fcfcfc' });
+    this.sounds.push('lock');
+    if (this.lockTips <= 0) return;
+    this.lockTips--;
+    const traits = [...new Set([...locks.values()].flat())];
+    this.popup(traits.map((t) => Object.values(TRAITS).find((d) => d!.trait === t)!.name).join(' + '), '#fcfcfc');
   }
 
   /** WARMTH: notes nearby come to you, and a little health. */
@@ -1333,7 +1356,7 @@ export function autoArrange(w: World) {
       const pat = w.pattern(id);
       for (const from of pat.keys())
         for (let to = 0; to < STEPS; to++) {
-          if (pat.has(to)) continue;
+          if (!w.lockPartners(id, to).length) continue;
           const pats = w.patterns();
           const p = new Map(pat);
           p.set(to, p.get(from)!);

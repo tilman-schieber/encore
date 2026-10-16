@@ -116,14 +116,18 @@ export function basePattern(id: InstId, lv: number): number[] {
  * (Parts that only happen to share a step, as the KICK and SNARE do, aren't locked.)
  */
 export type Trait = 'punch' | 'stun' | 'double' | 'weight' | 'warmth' | 'wide';
-export const TRAITS: Partial<Record<InstId, { trait: Trait; name: string; text: string }>> = {
-  kick: { trait: 'punch', name: 'PUNCH', text: 'HALF AGAIN THE DAMAGE' },
-  snare: { trait: 'stun', name: 'STUN', text: 'HITS STOP THE HUSH SHORT' },
-  hats: { trait: 'double', name: 'DOUBLE', text: 'PLAYS AGAIN A STEP LATER' },
-  bass: { trait: 'weight', name: 'WEIGHT', text: 'HITS SLOW THE HUSH DOWN' },
-  pad: { trait: 'warmth', name: 'WARMTH', text: 'PULLS NOTES IN, HEALS A LITTLE' },
-  arp: { trait: 'wide', name: 'WIDE', text: 'HALF AGAIN THE SIZE' },
+/** `does`: what a part that borrows the trait does on the locked step. */
+export const TRAITS: Partial<Record<InstId, { trait: Trait; name: string; text: string; does: string }>> = {
+  kick: { trait: 'punch', name: 'PUNCH', text: 'HALF AGAIN THE DAMAGE', does: 'HITS HARDER' },
+  snare: { trait: 'stun', name: 'STUN', text: 'HITS STOP THE HUSH SHORT', does: 'STUNS' },
+  hats: { trait: 'double', name: 'DOUBLE', text: 'PLAYS AGAIN A STEP LATER', does: 'PLAYS TWICE' },
+  bass: { trait: 'weight', name: 'WEIGHT', text: 'HITS SLOW THE HUSH DOWN', does: 'SLOWS' },
+  pad: { trait: 'warmth', name: 'WARMTH', text: 'PULLS NOTES IN, HEALS A LITTLE', does: 'HEALS' },
+  arp: { trait: 'wide', name: 'WIDE', text: 'HALF AGAIN THE SIZE', does: 'GOES WIDER' },
 };
+
+/** What locking `a` onto `b` does, e.g. KICK STUNS, SNARE HITS HARDER. */
+export const lockText = (a: InstId, b: InstId) => `${INST[b].name} ${TRAITS[a]!.does}, ${INST[a].name} ${TRAITS[b]!.does}`;
 
 /**
  * How many shots an instrument at a level fires on a step of the song (0: it is silent).

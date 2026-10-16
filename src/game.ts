@@ -4,7 +4,7 @@ import { sfx, music } from './audio';
 import { hashString, makeRng, randomSeed, today } from 'arcade-kit/rng';
 import { makeSong } from './song';
 import { World, Controls, Card, autopilot, autoArrange } from './world';
-import { InstId, STEP_FRAMES, editable } from './band';
+import { InstId, INST, STEP_FRAMES, editable, lockText } from './band';
 import { STEPS } from './song';
 import { HELP_PAGES } from './help';
 
@@ -374,6 +374,7 @@ export class Game {
     this.arrRow = 0;
     this.arrCol = 0;
     this.holding = -1;
+    this.banner = null;
   }
 
   /** Which cell of the REARRANGE grid a tap is on (see render.ts), or 'done', or null. */
@@ -394,9 +395,21 @@ export class Game {
       if (this.timer >= 0) (this.afterArrange = false), this.afterCards();
       return;
     }
+    if (this.banner) this.banner.t--;
     const rows = this.arrRows();
     const d = (pressed.has('right') ? 1 : 0) - (pressed.has('left') ? 1 : 0);
-    if (d) (this.arrCol = (this.arrCol + d + STEPS) % STEPS), sfx.move();
+    if (d && this.holding >= 0) {
+      // Holding a step, the cursor jumps between the steps where it would lock (and back home).
+      const id = rows[this.arrRow];
+      for (let k = 1; k <= STEPS; k++) {
+        const c = (this.arrCol + d * k + STEPS * 2) % STEPS;
+        if (c === this.holding || w.lockPartners(id, c).length) {
+          this.arrCol = c;
+          break;
+        }
+      }
+      sfx.move();
+    } else if (d) (this.arrCol = (this.arrCol + d + STEPS) % STEPS), sfx.move();
     // While holding a step it stays in its row.
     if (this.holding < 0) {
       if (pressed.has('up')) (this.arrRow = (this.arrRow + rows.length - 1) % rows.length), sfx.move();
@@ -426,12 +439,19 @@ export class Game {
     } else if (this.arrCol === this.holding) {
       this.holding = -1;
       sfx.move();
-    } else if (w.moveStep(id, this.holding, this.arrCol)) {
+    } else {
+      const with_ = w.lockPartners(id, this.arrCol);
+      if (!w.moveStep(id, this.holding, this.arrCol)) return void sfx.move();
       this.holding = -1;
-      sfx.choose();
+      sfx.locked();
+      this.banner = {
+        title: `LOCKED: ${[id, ...with_].map((o) => INST[o].name).join(' + ')}`,
+        text: with_.map((o) => lockText(id, o)).join('. '),
+        t: 150,
+      };
       if (w.movesLeft <= 0) {
-        // A moment to see where it landed.
-        this.timer = -30;
+        // A moment to read what the lock does.
+        this.timer = -90;
         this.afterArrange = true;
       }
     }
@@ -439,6 +459,8 @@ export class Game {
 
   /** The last move made: back to the street once the pause after it is over. */
   afterArrange = false;
+  /** What the lock just made does, shown for a while on the LOCK screen. */
+  banner: { title: string; text: string; t: number } | null = null;
 
   private gameOver() {
     const w = this.world!;

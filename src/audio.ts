@@ -48,6 +48,8 @@ export const sfx = {
   pickup: () => arp([76, 81, 88], 0.05, 0.18),
   levelup: () => arp([69, 73, 76, 81, 85, 88], 0.045, 0.16),
   choose: () => arp([81, 88], 0.05, 0.18),
+  lock: () => every('lock', 0.08) && (tone(2093, 0.04, 'triangle', 0.07), tone(3136, 0.05, 'triangle', 0.05, ctx!.currentTime + 0.03)),
+  locked: () => arp([76, 0, 83, 88], 0.05, 0.2),
   warning: () => {
     const t = audioNow();
     if (t === null) return;

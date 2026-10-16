@@ -1,6 +1,6 @@
 import { Game, MENU, MUSIC_NAMES, NAME_LEN, STARTERS, INTRO_FRAMES, ARR_X, ARR_Y, ARR_CELL, ARR_ROW, ARR_DONE_Y } from './game';
 import { World, Enemy, Shot, Card, SET_FRAMES } from './world';
-import { INST, GEARS, INSTRUMENTS, MAX_LEVEL, InstId, shots, bpm, editable, TRAITS, Trait } from './band';
+import { INST, GEARS, INSTRUMENTS, MAX_LEVEL, InstId, shots, bpm, editable, TRAITS, Trait, lockText } from './band';
 import { STEPS } from './song';
 import { MODES } from './modes';
 import { MAX_SCORES } from './scores';
@@ -440,7 +440,7 @@ function drawPattern(ctx: Ctx, w: World, id: InstId, lv: number, x: number, y: n
   }
 }
 
-function cardText(c: Card): [string, string, string, string] {
+function cardText(c: Card, w: World): [string, string, string, string] {
   switch (c.kind) {
     case 'inst': {
       const d = INST[c.id];
@@ -454,8 +454,11 @@ function cardText(c: Card): [string, string, string, string] {
       return ['HOT TEA', '', 'HEALS 50', GREEN];
     case 'tips':
       return ['TIP JAR', '', '+1000 POINTS', YELLOW];
-    case 'arrange':
-      return ['REARRANGE', '', 'MOVE TWO STEPS. PUT ONE ON ANOTHER PART TO LOCK THE TWO.', WHITE];
+    case 'arrange': {
+      // An example from the parts you hold: what the first two would do locked.
+      const [a, b] = w.instruments.filter((s) => editable(s.id)).map((s) => s.id).reverse();
+      return ['LOCK', 'PUT 2 STEPS ON OTHER PARTS', `${INST[a].name} ON ${INST[b].name}: ${lockText(a, b)}`, WHITE];
+    }
   }
 }
 
@@ -467,38 +470,50 @@ function renderArrange(ctx: Ctx, game: Game, frame: number) {
   const w = game.world!;
   dim(ctx, 0.75);
   const rows = game.arrRows();
+  const banner = game.banner && game.banner.t > 0 ? game.banner : null;
   drawBox(ctx, 8, 6, 240, 28);
-  drawText(ctx, 'REARRANGE', 16, 12, YELLOW);
+  drawText(ctx, 'LOCK', 16, 12, YELLOW);
   const left = `MOVES LEFT ${w.movesLeft}`;
   drawText(ctx, left, 240 - textWidth(left), 12, w.movesLeft ? WHITE : GREY);
-  drawText(ctx, 'A STEP ON ANOTHER PART LOCKS THE TWO', 16, 22, LIGHT);
+  drawText(ctx, 'STEP ON STEP: TWO PARTS SWAP POWERS', 16, 22, LIGHT);
 
   const pats = w.patterns();
   const none = new Set<InstId>();
   const locks = [...Array(STEPS).keys()].map((k) => w.locksAt(k, pats, none));
+  const id = rows[game.arrRow];
+  const holding = game.holding >= 0;
+  const targets = [...Array(STEPS).keys()].map((k) => (holding ? w.lockPartners(id, k, pats) : []));
   drawBox(ctx, 8, ARR_Y - 6, 240, rows.length * ARR_ROW + 10);
-  rows.forEach((id, r) => {
+  rows.forEach((rid, r) => {
     const y = ARR_Y + r * ARR_ROW;
-    const pat = pats.get(id)!;
-    const def = INST[id];
+    const pat = pats.get(rid)!;
+    const def = INST[rid];
+    const mine = r === game.arrRow;
     ctx.fillStyle = def.color;
     ctx.fillRect(ARR_X - 10, y + 3, 5, 5);
     for (let k = 0; k < STEPS; k++) {
       const x = ARR_X + k * ARR_CELL;
       const on = pat.has(k);
-      const held = r === game.arrRow && k === game.holding;
+      const held = mine && k === game.holding;
       ctx.fillStyle = k === w.barStep ? '#484858' : k % 4 === 0 ? '#2c2c40' : '#1c1c28';
       ctx.fillRect(x, y, ARR_CELL - 2, ARR_ROW - 3);
+      // Holding a step: where it would lock glows in the colour of the part it locks with.
+      if (holding && mine && targets[k].length) {
+        ctx.strokeStyle = INST[targets[k][0]].color;
+        ctx.lineWidth = 1;
+        ctx.strokeRect(x + 0.5, y + 0.5, ARR_CELL - 3, ARR_ROW - 4);
+        ctx.fillStyle = INST[targets[k][0]].color;
+        const d = (frame >> 3) % 2;
+        ctx.fillRect(x + 3 + d, y + 3 + d, ARR_CELL - 8 - 2 * d, ARR_ROW - 9 - 2 * d);
+      }
+      // Other rows dim, but the steps a held step could lock with stay lit.
       if (on && !(held && (frame >> 3) % 2)) {
         ctx.fillStyle = def.color;
+        if (holding && !mine && !targets[k].length) ctx.globalAlpha = 0.25;
         ctx.fillRect(x + 1, y + 1, ARR_CELL - 4, ARR_ROW - 5);
+        ctx.globalAlpha = 1;
       }
-      // A moved step has a dot; a locked one a white frame.
-      if (on && pat.get(k) !== k) {
-        ctx.fillStyle = '#000';
-        ctx.fillRect(x + 4, y + 4, 3, 3);
-      }
-      if (on && locks[k].has(id)) {
+      if (on && locks[k].has(rid)) {
         ctx.strokeStyle = WHITE;
         ctx.lineWidth = 1;
         ctx.strokeRect(x + 0.5, y + 0.5, ARR_CELL - 3, ARR_ROW - 4);
@@ -511,26 +526,32 @@ function renderArrange(ctx: Ctx, game: Game, frame: number) {
   ctx.lineWidth = 1;
   ctx.strokeRect(cx - 1.5, cy - 1.5, ARR_CELL + 1, ARR_ROW);
 
-  const id = rows[game.arrRow];
   const def = INST[id];
   const y0 = ARR_Y + rows.length * ARR_ROW + 12;
   drawBox(ctx, 8, y0 - 6, 240, ARR_DONE_Y - y0);
-  drawText(ctx, def.name, 16, y0, def.color);
-  drawText(ctx, `LENDS ${TRAITS[id]!.name}`, 16 + textWidth(def.name) + 6, y0, WHITE);
-  drawText(ctx, TRAITS[id]!.text, 16, y0 + 10, GREY);
-  let line: [string, string];
-  const here = [...pats].filter(([o, p]) => o !== id && p.has(game.arrCol)).map(([o]) => o);
-  if (game.holding >= 0) {
-    if (pats.get(id)!.has(game.arrCol)) line = [game.arrCol === game.holding ? 'ENTER PUTS IT BACK' : 'THAT STEP IS TAKEN', GREY];
-    else if (here.length)
-      line = [`LOCKS WITH ${here.map((o) => INST[o].name).join(' + ')}: GETS ${traitList(here.map((o) => TRAITS[o]!.trait))}`, YELLOW];
-    else line = ['NO LOCK THERE, BUT IT FILLS A GAP', LIGHT];
-  } else if (locks[game.arrCol].has(id) && pats.get(id)!.has(game.arrCol)) line = [`THIS STEP GETS ${traitList(locks[game.arrCol].get(id)!)}`, WHITE];
-  else line = [pats.get(id)!.has(game.arrCol) ? 'ENTER PICKS THIS STEP UP' : 'PICK UP A LIT STEP', GREY];
-  wrapText([line[0]], 37).slice(0, 2).forEach((l, k) => drawText(ctx, l, 16, y0 + 24 + k * 10, line[1]));
+  if (banner) {
+    // Just locked: what the lock does.
+    drawText(ctx, banner.title, 16, y0, (frame >> 3) % 2 ? YELLOW : WHITE);
+    wrapText([banner.text], 37).slice(0, 3).forEach((l, k) => drawText(ctx, l, 16, y0 + 12 + k * 10, WHITE));
+  } else {
+    drawText(ctx, def.name, 16, y0, def.color);
+    drawText(ctx, `LENDS ${TRAITS[id]!.name}`, 16 + textWidth(def.name) + 6, y0, WHITE);
+    drawText(ctx, TRAITS[id]!.text, 16, y0 + 10, GREY);
+    let line: [string, string];
+    const pat = pats.get(id)!;
+    if (holding) {
+      const with_ = w.lockPartners(id, game.arrCol, pats);
+      const any = targets.some((t) => t.length);
+      if (game.arrCol === game.holding) line = [any ? 'MOVE IT ONTO A GLOWING STEP' : 'NOTHING TO LOCK WITH. ESC DROPS IT', LIGHT];
+      else if (with_.length) line = [`LOCKS WITH ${with_.map((o) => INST[o].name).join(' + ')}: ${with_.map((o) => lockText(id, o)).join('. ')}`, YELLOW];
+      else line = ['NO LOCK THERE', GREY];
+    } else if (locks[game.arrCol].has(id) && pat.has(game.arrCol)) line = [`LOCKED. HERE IT GETS ${traitList(locks[game.arrCol].get(id)!)}`, WHITE];
+    else line = [pat.has(game.arrCol) ? 'ENTER PICKS THIS STEP UP' : 'PICK UP A LIT STEP', GREY];
+    wrapText([line[0]], 37).slice(0, 3).forEach((l, k) => drawText(ctx, l, 16, y0 + 24 + k * 10, line[1]));
+  }
 
   drawBox(ctx, 8, ARR_DONE_Y, 240, 22);
-  drawTextCentered(ctx, game.holding >= 0 ? 'LEFT RIGHT MOVE  ENTER PUT  ESC DROP' : 'ARROWS  ENTER PICK UP  ESC DONE', W / 2, ARR_DONE_Y + 7, LIGHT);
+  drawTextCentered(ctx, holding ? 'LEFT RIGHT MOVE  ENTER PUT  ESC DROP' : 'ARROWS  ENTER PICK UP  ESC DONE', W / 2, ARR_DONE_Y + 7, LIGHT);
 }
 
 function renderLevelUp(ctx: Ctx, game: Game, frame: number) {
@@ -548,7 +569,7 @@ function renderLevelUp(ctx: Ctx, game: Game, frame: number) {
       ctx.lineWidth = 1;
       ctx.strokeRect(13.5, y + 1.5, 229, 39);
     }
-    const [name, lv, desc, color] = cardText(c);
+    const [name, lv, desc, color] = cardText(c, w);
     ctx.fillStyle = color;
     ctx.fillRect(20, y + 8, 6, 6);
     drawText(ctx, name, 30, y + 8, on ? WHITE : LIGHT);
