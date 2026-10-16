@@ -90,7 +90,7 @@ On the street: tea heals, a mic pulls in every note on the ground, and the gold 
 
 A gamepad works too: stick or d-pad to walk (the stick by how far you push it), A to choose, Start to pause and Select to quit from the pause screen. On the title screen Y shows the high scores; when typing a name, Up/Down pick a letter, A enters it and B rubs one out.
 
-**D-pad not working on a Mac?** Cheap SNES-style USB pads (DragonRise, `0079:0011`, sold as "USB Gamepad") describe their d-pad in a way Chrome on macOS can't read: it sees the buttons but not the d-pad. Open the game with `?webhid` (https://gh.tschieber.de/encore/?webhid) and click CONNECT GAMEPAD at the top right to read the d-pad over WebHID instead, then press one of the pad's buttons so the browser reports the pad. Chrome remembers the pad after that. Chrome and Edge only, as other browsers have no WebHID. The code is in `src/hidpad.ts`.
+**D-pad not working on a Mac?** Cheap SNES-style USB pads (DragonRise, `0079:0011`, sold as "USB Gamepad") describe their d-pad in a way Chrome on macOS can't read: it sees the buttons but not the d-pad. Open the game with `?webhid` (https://gh.tschieber.de/encore/?webhid) and click CONNECT GAMEPAD at the top right to read the d-pad over WebHID instead, then press one of the pad's buttons so the browser reports the pad. Chrome remembers the pad after that. Chrome and Edge only, as other browsers have no WebHID. The code is in [arcade-kit](https://github.com/tilman-schieber/arcade-kit)'s `hidpad` module.
 
 On phones, put a finger down anywhere on the screen and drag to walk. Tap a card to take it. To rearrange, tap a lit step, then the step it goes to; tap the bar at the bottom when done.
 

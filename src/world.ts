@@ -1,7 +1,7 @@
 // One run: the busker, the band on its sequencer, the Hush closing in, and everything flying between them.
 // Nothing here makes a sound or draws a pixel: the world lists the notes it played for audio.ts,
 // and render.ts draws what it holds.
-import { Rng } from './rng';
+import { Rng } from 'arcade-kit/rng';
 import { Song, STEPS, LOOP } from './song';
 import {
   InstId, GearId, MAX_LEVEL, MAX_INSTRUMENTS, MAX_GEAR, INSTRUMENTS, GEAR, GEARS, STEP_FRAMES, shots, accent, stats,

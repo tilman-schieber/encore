@@ -1,7 +1,7 @@
 // Headless balance runs: the demo busker plays whole runs, and we print how they went.
 // npm run playtest -- [runs] [mode]
 import { World, Card, autopilot, autoArrange, pickCard, tune, tuneMutes } from '../../src/world';
-import { makeRng } from '../../src/rng';
+import { makeRng } from 'arcade-kit/rng';
 import { makeSong } from '../../src/song';
 import { STARTERS } from '../../src/game';
 

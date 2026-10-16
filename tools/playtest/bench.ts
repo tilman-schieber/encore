@@ -1,7 +1,7 @@
 // Each instrument alone, at each level, against the crowd at a given minute: damage that landed in a minute.
 // npm run playtest:bench -- [minute] [seeds]
 import { World, autopilot } from '../../src/world';
-import { makeRng } from '../../src/rng';
+import { makeRng } from 'arcade-kit/rng';
 import { makeSong } from '../../src/song';
 import { INSTRUMENTS, MAX_LEVEL } from '../../src/band';
 

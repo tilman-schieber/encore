@@ -1,6 +1,6 @@
 // The song of a run, made up from its seed: a key, eight bars of chords and a melody over them.
 // It is plain data: the game reads it to know when the LEAD and the BASS fire, the synth to play it.
-import { makeRng, Rng } from './rng';
+import { makeRng, Rng } from 'arcade-kit/rng';
 
 /** Sixteenths in a bar, bars in the loop. */
 export const STEPS = 16;

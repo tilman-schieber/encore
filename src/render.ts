@@ -6,10 +6,11 @@ import { MODES } from './modes';
 import { MAX_SCORES } from './scores';
 import { HELP_PAGES, wrapText } from './help';
 import { SPR, Sprite } from './sprites';
-import { drawText, drawTextCentered, drawTextScaled, drawTextShadow, textWidth } from './font';
-import { Ctx, W, H, WHITE, RED, GREY, LIGHT, DARK, YELLOW, BLUE, GREEN, drawBox, pad, hash } from './draw';
+import { drawText, drawTextCentered, drawTextScaled, drawTextShadow, textWidth } from 'arcade-kit/font';
+import { Ctx, WHITE, RED, GREY, LIGHT, DARK, YELLOW, BLUE, GREEN, drawBox, pad, hash } from 'arcade-kit/draw';
 
-export { W, H };
+export const W = 256;
+export const H = 224;
 
 // ---------- the street ----------
 

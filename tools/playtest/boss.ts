@@ -1,7 +1,7 @@
 // Boss fights alone: a busker with a given number of level-ups at 9:55, against THE SILENCE.
 // node boss.mjs [runs] [level-ups]
 import { World, autopilot, autoArrange, pickCard } from '../../src/world';
-import { makeRng } from '../../src/rng';
+import { makeRng } from 'arcade-kit/rng';
 import { makeSong } from '../../src/song';
 import { STARTERS } from '../../src/game';
 

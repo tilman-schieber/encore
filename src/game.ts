@@ -1,7 +1,7 @@
 import { MODES, TABLES, TableId } from './modes';
 import { loadTables, saveTables, rankFor, ScoreEntry, Tables, MAX_SCORES, load, save, fetchGlobal, submitGlobal, flushPending } from './scores';
 import { sfx, music } from './audio';
-import { hashString, makeRng, randomSeed, today } from './rng';
+import { hashString, makeRng, randomSeed, today } from 'arcade-kit/rng';
 import { makeSong } from './song';
 import { World, Controls, Card, autopilot, autoArrange } from './world';
 import { InstId, STEP_FRAMES, editable } from './band';
