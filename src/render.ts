@@ -1,6 +1,6 @@
-import { Game, MENU, MUSIC_NAMES, NAME_LEN, STARTERS, INTRO_FRAMES } from './game';
+import { Game, MENU, MUSIC_NAMES, NAME_LEN, STARTERS, INTRO_FRAMES, ARR_X, ARR_Y, ARR_CELL, ARR_ROW, ARR_DONE_Y } from './game';
 import { World, Enemy, Shot, Card, SET_FRAMES } from './world';
-import { INST, GEARS, INSTRUMENTS, MAX_LEVEL, InstId, shots, bpm } from './band';
+import { INST, GEARS, INSTRUMENTS, MAX_LEVEL, InstId, shots, bpm, editable, TRAITS, Trait } from './band';
 import { STEPS } from './song';
 import { MODES } from './modes';
 import { MAX_SCORES } from './scores';
@@ -180,6 +180,19 @@ function drawEnemy(ctx: Ctx, e: Enemy, x: number, y: number, frame: number) {
     case 'heckler':
       blit(ctx, SPR.heckler[e.t % 160 > 140 ? 1 : 0], x, y, e.flip, white);
       break;
+    case 'mute': {
+      blit(ctx, SPR.mute[anim], x, y, e.flip, white);
+      if (e.mute) {
+        // Its part above it, crossed out.
+        const c = INST[e.mute].color;
+        blit(ctx, SPR.note.white, x, y - 12);
+        ctx.fillStyle = c;
+        ctx.fillRect(Math.round(x) - 3, Math.round(y) - 15, 6, 6);
+        ctx.fillStyle = RED;
+        for (let k = 0; k < 7; k++) ctx.fillRect(Math.round(x) - 4 + k, Math.round(y) - 16 + k, 1, 1);
+      }
+      break;
+    }
     case 'feedback': {
       const screech = e.mode === 1 && (frame >> 1) % 2 === 0;
       blit(ctx, SPR.feedback[0], x + (e.mode === 1 ? (frame % 2) - 0.5 : 0), y, e.flip, white || screech);
@@ -284,6 +297,16 @@ export function renderWorld(ctx: Ctx, w: World, frame: number) {
   for (const e of order) {
     if (e) {
       drawEnemy(ctx, e, e.x - cx, e.y - cy, frame);
+      // STUN: stars round the head; WEIGHT: a heavy blue line underfoot.
+      if (e.stun > 0) for (let k = 0; k < 3; k++) {
+        const a = frame * 0.15 + (k * Math.PI * 2) / 3;
+        ctx.fillStyle = YELLOW;
+        ctx.fillRect(Math.round(e.x - cx + Math.cos(a) * 5), Math.round(e.y - cy - e.r - 3 + Math.sin(a) * 1.5), 1, 1);
+      }
+      if (e.slowT > 0) {
+        ctx.fillStyle = '#a858f8';
+        ctx.fillRect(Math.round(e.x - cx - e.r), Math.round(e.y - cy + e.r + 1), e.r * 2, 1);
+      }
       continue;
     }
     if (w.state === 'dead') continue;
@@ -350,15 +373,21 @@ function drawSequencer(ctx: Ctx, w: World, x: number, y: number) {
   ctx.fillStyle = '#000';
   ctx.fillRect(x - 2, y - 2, 74, rows * 4 + 3);
   ctx.globalAlpha = 1;
+  const muted = w.muted();
+  const pats = w.patterns();
+  const locks = [...Array(STEPS).keys()].map((k) => w.locksAt(k, pats, muted));
   w.instruments.forEach((s, r) => {
     const def = INST[s.id];
+    const off = muted.has(s.id);
+    const pat = pats.get(s.id);
     for (let k = 0; k < STEPS; k++) {
-      const on = shots(s.id, s.lv, bar0 + k, w.song) > 0;
+      const on = pat ? pat.has(k) : shots(s.id, s.lv, bar0 + k, w.song) > 0;
       const now = k === w.barStep;
-      ctx.fillStyle = on ? (now ? WHITE : def.color) : now ? '#585858' : '#202030';
+      const lit = off ? '#383838' : locks[k].has(s.id) ? WHITE : def.color;
+      ctx.fillStyle = on ? (now && !off ? YELLOW : lit) : now ? '#585858' : '#202030';
       ctx.fillRect(x + 6 + k * 4 + (k >> 2), y + r * 4, 3, 3);
     }
-    ctx.fillStyle = def.color;
+    ctx.fillStyle = off ? RED : def.color;
     ctx.fillRect(x, y + r * 4, 3, 3);
   });
 }
@@ -402,8 +431,9 @@ function drawHud(ctx: Ctx, w: World, frame: number) {
 
 /** A sixteen-step pattern, drawn small, of an instrument at a level (the first bar). */
 function drawPattern(ctx: Ctx, w: World, id: InstId, lv: number, x: number, y: number) {
+  const pat = editable(id) ? w.pattern(id, lv) : null;
   for (let k = 0; k < STEPS; k++) {
-    const on = shots(id, lv, k, w.song) > 0;
+    const on = pat ? pat.has(k) : shots(id, lv, k, w.song) > 0;
     ctx.fillStyle = on ? INST[id].color : '#303040';
     ctx.fillRect(x + k * 4 + (k >> 2), y, 3, 3);
   }
@@ -423,7 +453,83 @@ function cardText(c: Card): [string, string, string, string] {
       return ['HOT TEA', '', 'HEALS 50', GREEN];
     case 'tips':
       return ['TIP JAR', '', '+1000 POINTS', YELLOW];
+    case 'arrange':
+      return ['REARRANGE', '', 'MOVE TWO STEPS. PUT ONE ON ANOTHER PART TO LOCK THE TWO.', WHITE];
   }
+}
+
+// ---------- rearranging ----------
+
+const traitList = (ts: Trait[]) => ts.map((t) => Object.values(TRAITS).find((d) => d!.trait === t)!.name).join(' + ');
+
+function renderArrange(ctx: Ctx, game: Game, frame: number) {
+  const w = game.world!;
+  dim(ctx, 0.75);
+  const rows = game.arrRows();
+  drawBox(ctx, 8, 6, 240, 28);
+  drawText(ctx, 'REARRANGE', 16, 12, YELLOW);
+  const left = `MOVES LEFT ${w.movesLeft}`;
+  drawText(ctx, left, 240 - textWidth(left), 12, w.movesLeft ? WHITE : GREY);
+  drawText(ctx, 'A STEP ON ANOTHER PART LOCKS THE TWO', 16, 22, LIGHT);
+
+  const pats = w.patterns();
+  const none = new Set<InstId>();
+  const locks = [...Array(STEPS).keys()].map((k) => w.locksAt(k, pats, none));
+  drawBox(ctx, 8, ARR_Y - 6, 240, rows.length * ARR_ROW + 10);
+  rows.forEach((id, r) => {
+    const y = ARR_Y + r * ARR_ROW;
+    const pat = pats.get(id)!;
+    const def = INST[id];
+    ctx.fillStyle = def.color;
+    ctx.fillRect(ARR_X - 10, y + 3, 5, 5);
+    for (let k = 0; k < STEPS; k++) {
+      const x = ARR_X + k * ARR_CELL;
+      const on = pat.has(k);
+      const held = r === game.arrRow && k === game.holding;
+      ctx.fillStyle = k === w.barStep ? '#484858' : k % 4 === 0 ? '#2c2c40' : '#1c1c28';
+      ctx.fillRect(x, y, ARR_CELL - 2, ARR_ROW - 3);
+      if (on && !(held && (frame >> 3) % 2)) {
+        ctx.fillStyle = def.color;
+        ctx.fillRect(x + 1, y + 1, ARR_CELL - 4, ARR_ROW - 5);
+      }
+      // A moved step has a dot; a locked one a white frame.
+      if (on && pat.get(k) !== k) {
+        ctx.fillStyle = '#000';
+        ctx.fillRect(x + 4, y + 4, 3, 3);
+      }
+      if (on && locks[k].has(id)) {
+        ctx.strokeStyle = WHITE;
+        ctx.lineWidth = 1;
+        ctx.strokeRect(x + 0.5, y + 0.5, ARR_CELL - 3, ARR_ROW - 4);
+      }
+    }
+  });
+  // The cursor, and the step in hand.
+  const cx = ARR_X + game.arrCol * ARR_CELL, cy = ARR_Y + game.arrRow * ARR_ROW;
+  ctx.strokeStyle = YELLOW;
+  ctx.lineWidth = 1;
+  ctx.strokeRect(cx - 1.5, cy - 1.5, ARR_CELL + 1, ARR_ROW);
+
+  const id = rows[game.arrRow];
+  const def = INST[id];
+  const y0 = ARR_Y + rows.length * ARR_ROW + 12;
+  drawBox(ctx, 8, y0 - 6, 240, ARR_DONE_Y - y0);
+  drawText(ctx, def.name, 16, y0, def.color);
+  drawText(ctx, `LENDS ${TRAITS[id]!.name}`, 16 + textWidth(def.name) + 6, y0, WHITE);
+  drawText(ctx, TRAITS[id]!.text, 16, y0 + 10, GREY);
+  let line: [string, string];
+  const here = [...pats].filter(([o, p]) => o !== id && p.has(game.arrCol)).map(([o]) => o);
+  if (game.holding >= 0) {
+    if (pats.get(id)!.has(game.arrCol)) line = [game.arrCol === game.holding ? 'ENTER PUTS IT BACK' : 'THAT STEP IS TAKEN', GREY];
+    else if (here.length)
+      line = [`LOCKS WITH ${here.map((o) => INST[o].name).join(' + ')}: GETS ${traitList(here.map((o) => TRAITS[o]!.trait))}`, YELLOW];
+    else line = ['NO LOCK THERE, BUT IT FILLS A GAP', LIGHT];
+  } else if (locks[game.arrCol].has(id) && pats.get(id)!.has(game.arrCol)) line = [`THIS STEP GETS ${traitList(locks[game.arrCol].get(id)!)}`, WHITE];
+  else line = [pats.get(id)!.has(game.arrCol) ? 'ENTER PICKS THIS STEP UP' : 'PICK UP A LIT STEP', GREY];
+  wrapText([line[0]], 37).slice(0, 2).forEach((l, k) => drawText(ctx, l, 16, y0 + 24 + k * 10, line[1]));
+
+  drawBox(ctx, 8, ARR_DONE_Y, 240, 22);
+  drawTextCentered(ctx, game.holding >= 0 ? 'LEFT RIGHT MOVE  ENTER PUT  ESC DROP' : 'ARROWS  ENTER PICK UP  ESC DONE', W / 2, ARR_DONE_Y + 7, LIGHT);
 }
 
 function renderLevelUp(ctx: Ctx, game: Game, frame: number) {
@@ -654,6 +760,9 @@ export function render(ctx: Ctx, game: Game, frame: number) {
       renderWorld(ctx, game.world!, frame);
       drawHud(ctx, game.world!, frame);
       return renderLevelUp(ctx, game, frame);
+    case 'arrange':
+      renderWorld(ctx, game.world!, frame);
+      return renderArrange(ctx, game, frame);
     case 'over':
       return renderOver(ctx, game, frame);
     case 'entry':

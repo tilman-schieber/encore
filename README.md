@@ -33,6 +33,21 @@ Six instruments at most, each up to level 5. A level more is a busier part: more
 
 The sequencer at the bottom left shows the bar now playing: a row per instrument, a lit step for each shot.
 
+### Rearranging and locks
+
+A REARRANGE card lets you move two steps of any part but the LEAD (it plays the tune) and the CRASH (it plays on the bar). Moved steps stay where you put them as the part levels up. Move a step onto a step of another part and the two **lock**: on that step each lends the other its trait. Parts that only happen to share a step, as the KICK and SNARE do, aren't locked. Locked steps are white on the sequencer.
+
+| Part | Lends | On a locked step |
+| --- | --- | --- |
+| KICK | PUNCH | Half again the damage |
+| SNARE | STUN | Hits stop the Hush short (not bosses) |
+| HATS | DOUBLE | Plays again a step later |
+| BASS | WEIGHT | Hits slow the Hush down |
+| PAD | WARMTH | Pulls in notes nearby and heals a little |
+| ARP | WIDE | Half again the size |
+
+So stacking parts on one step makes a burst, and spreading them keeps the fire steady.
+
 ## Gear
 
 | Gear | Does |
@@ -57,6 +72,7 @@ On the street: tea heals, a mic pulls in every note on the ground, and the gold 
 | HECKLER | Keeps away and throws tomatoes |
 | EARPLUG | Slow and hard to stop |
 | FEEDBACK | Stops, screeches, then charges |
+| MUTE | Hangs about just out of reach and silences one of your parts while near (its part is shown crossed out above it). One comes every 45 seconds from minute three, never more than two. The SNARE and LEAD go for it first |
 | THE NEIGHBOR | A noise complaint with a broom: slams rings of shockwaves |
 | THE SILENCE | A hole in the night with one eye: rings and spirals of rests, and it calls the Hush to it. The band goes quiet as it comes |
 
@@ -76,7 +92,7 @@ A gamepad works too: stick or d-pad to walk (the stick by how far you push it), 
 
 **D-pad not working on a Mac?** Cheap SNES-style USB pads (DragonRise, `0079:0011`, sold as "USB Gamepad") describe their d-pad in a way Chrome on macOS can't read: it sees the buttons but not the d-pad. Open the game with `?webhid` (https://gh.tschieber.de/encore/?webhid) and click CONNECT GAMEPAD at the top right to read the d-pad over WebHID instead, then press one of the pad's buttons so the browser reports the pad. Chrome remembers the pad after that. Chrome and Edge only, as other browsers have no WebHID. The code is in `src/hidpad.ts`.
 
-On phones, put a finger down anywhere on the screen and drag to walk. Tap a card to take it.
+On phones, put a finger down anywhere on the screen and drag to walk. Tap a card to take it. To rearrange, tap a lit step, then the step it goes to; tap the bar at the bottom when done.
 
 ## Music
 
@@ -94,8 +110,8 @@ npm run dev
 npm run build
 ```
 
-Add `?debug` to the URL for debug mode: in play, L levels up, T jumps a minute ahead, B skips to THE SILENCE and I heals. Games in debug mode don't go into the high scores.
+Add `?debug` to the URL for debug mode: in play, L levels up, T jumps a minute ahead, B skips to THE SILENCE, I heals, R opens a REARRANGE and U calls a MUTE. The game is then `window.game` in the console. Games in debug mode don't go into the high scores.
 
-`npm run playtest -- [runs] [set|endless]` has a bot busker play whole runs headless. It picks cards like a player (`--first` or `--random` for dumber picks) and prints, for each run, its level by the minute, its lowest health, how long THE SILENCE lasted, and which instruments did the damage; `--brief` keeps it to one line a run. Two more numbers after the mode try another curve for enemy health (linear and square terms a minute).
+`npm run playtest -- [runs] [set|endless]` has a bot busker play whole runs headless. It picks cards like a player (`--first` or `--random` for dumber picks) and prints, for each run, its level by the minute, its lowest health, how long THE SILENCE lasted, and which instruments did the damage; `--brief` keeps it to one line a run. Two more numbers after the mode try another curve for enemy health (linear and square terms a minute); `--no-arrange` never takes a REARRANGE, and `--mutes=N` sends a MUTE every N seconds (0: none).
 
 `npm run playtest:boss` sets a built-up busker against THE SILENCE alone, and `npm run playtest:bench -- [minute]` plays each instrument alone at each level and prints the damage it lands in a minute.

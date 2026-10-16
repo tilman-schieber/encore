@@ -101,6 +101,30 @@ const DRUMS: Record<'kick' | 'snare' | 'hats' | 'bass' | 'pad', number[][]> = {
 const ARP_EVERY = [2, 2, 2, 1, 1];
 const CRASH_EVERY = [4, 4, 2, 2, 2];
 
+/** The parts you can rearrange on the sequencer; the LEAD follows the tune and the CRASH the bars. */
+export const EDITABLE: InstId[] = ['kick', 'snare', 'hats', 'bass', 'pad', 'arp'];
+export const editable = (id: InstId) => EDITABLE.includes(id);
+
+/** The steps of a bar an editable part plays at a level, before you move any. */
+export function basePattern(id: InstId, lv: number): number[] {
+  if (id === 'arp') return [...Array(STEPS).keys()].filter((s) => s % ARP_EVERY[lv - 1] === 0);
+  return DRUMS[id as keyof typeof DRUMS][lv - 1];
+}
+
+/**
+ * A step you moved onto another part's step locks the two: on it, each lends the other its trait.
+ * (Parts that only happen to share a step, as the KICK and SNARE do, aren't locked.)
+ */
+export type Trait = 'punch' | 'stun' | 'double' | 'weight' | 'warmth' | 'wide';
+export const TRAITS: Partial<Record<InstId, { trait: Trait; name: string; text: string }>> = {
+  kick: { trait: 'punch', name: 'PUNCH', text: 'HALF AGAIN THE DAMAGE' },
+  snare: { trait: 'stun', name: 'STUN', text: 'HITS STOP THE HUSH SHORT' },
+  hats: { trait: 'double', name: 'DOUBLE', text: 'PLAYS AGAIN A STEP LATER' },
+  bass: { trait: 'weight', name: 'WEIGHT', text: 'HITS SLOW THE HUSH DOWN' },
+  pad: { trait: 'warmth', name: 'WARMTH', text: 'PULLS NOTES IN, HEALS A LITTLE' },
+  arp: { trait: 'wide', name: 'WIDE', text: 'HALF AGAIN THE SIZE' },
+};
+
 /**
  * How many shots an instrument at a level fires on a step of the song (0: it is silent).
  * `step` counts sixteenths since the start of the run.

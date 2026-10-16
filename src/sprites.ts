@@ -102,6 +102,13 @@ const NEIGHBOR = [
   '....FFF..YYY........',
 ];
 
+// A MUTE: a grey hood, a pale face, a finger to its lips.
+const MUTE_PAL = { H: '#585878', h: '#383850', S: '#e4c8c0', K: '#000000', F: '#fcbcb0', D: '#202030' };
+const MUTE = [
+  ['...HHHH...', '..HHHHHH..', '.HHSSSSHH.', '.HSKSSKSH.', '.HSSFSSSH.', '.HSSFSSSH.', '.HHSFSSHH.', 'HHHHFHHHHh', 'HHHHHHHHhh', '.HHHHHHHh.', '.HHHHHHhh.', '..hhhhhh..', '..DD..DD..'],
+  ['...HHHH...', '..HHHHHH..', '.HHSSSSHH.', '.HSKSSKSH.', '.HSSFSSSH.', '.HSSFSSSH.', '.HHSFSSHH.', 'HHHHFHHHHh', 'HHHHHHHHhh', '.HHHHHHHh.', '.HHHHHHhh.', '..hhhhhh..', '.DD....DD.'],
+];
+
 const NOTE = ['..XXX', '..X.X', '..X..', '..X..', '.XX..', 'XXX..', '.X...'];
 const TEA = ['.S.S...', '..S.S..', 'WWWWW..', 'WGGGWWW', 'WWWWW.W', '.WWW...'];
 const MIC = ['.GgG.', 'GgGgG', 'GGgGG', '.GGG.', '..K..', '..K..', '..K..', '.KKK.'];
@@ -115,6 +122,7 @@ export const SPR = {} as {
   plug: Sprite[];
   heckler: Sprite[];
   feedback: Sprite[];
+  mute: Sprite[];
   neighbor: Sprite[];
   note: Record<'white' | 'green' | 'gold' | 'blue' | 'lime', Sprite>;
   tea: Sprite;
@@ -130,6 +138,7 @@ export function loadSprites() {
   SPR.plug = PLUG.map((r) => build(r, PLUG_PAL));
   SPR.heckler = HECKLER.map((r) => build(r, HECKLER_PAL));
   SPR.feedback = FEEDBACK.map((r) => build(r, FEEDBACK_PAL));
+  SPR.mute = MUTE.map((r) => build(r, MUTE_PAL));
   SPR.neighbor = [build(NEIGHBOR, NEIGHBOR_PAL)];
   SPR.note = {
     white: build(NOTE, { X: '#bcd8fc' }),

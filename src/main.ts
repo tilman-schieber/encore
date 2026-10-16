@@ -43,6 +43,8 @@ const KEYS: Record<string, Action> = {
 };
 
 const game = new Game();
+// With ?debug the game is reachable from the console (and from browser tests).
+if (game.debug) (window as unknown as { game: Game }).game = game;
 const input: Input = { held: new Set(), pressed: new Set(), typed: [], stick: { x: 0, y: 0 }, tap: null };
 /** Keys currently down: e.code -> lower-cased e.key at press time (key-up may report a different key). */
 const heldKeys = new Map<string, string>();

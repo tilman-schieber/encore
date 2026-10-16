@@ -5,12 +5,13 @@ import { Rng } from './rng';
 import { Song, STEPS, LOOP } from './song';
 import {
   InstId, GearId, MAX_LEVEL, MAX_INSTRUMENTS, MAX_GEAR, INSTRUMENTS, GEAR, GEARS, STEP_FRAMES, shots, accent, stats,
+  EDITABLE, editable, basePattern, TRAITS, Trait, INST,
 } from './band';
 
 export const W = 256;
 export const H = 224;
 
-export type EnemyKind = 'shh' | 'static' | 'plug' | 'heckler' | 'feedback' | 'neighbor' | 'silence';
+export type EnemyKind = 'shh' | 'static' | 'plug' | 'heckler' | 'feedback' | 'mute' | 'neighbor' | 'silence';
 
 interface KindDef {
   hp: number;
@@ -28,6 +29,7 @@ export const KINDS: Record<EnemyKind, KindDef> = {
   plug: { hp: 60, speed: 0.3, dmg: 14, r: 7, xp: 5, pts: 40 },
   heckler: { hp: 20, speed: 0.5, dmg: 8, r: 5, xp: 3, pts: 30 },
   feedback: { hp: 26, speed: 0.42, dmg: 15, r: 5, xp: 3, pts: 30 },
+  mute: { hp: 22, speed: 0.6, dmg: 6, r: 5, xp: 6, pts: 80 },
   neighbor: { hp: 1100, speed: 0.4, dmg: 20, r: 11, xp: 0, pts: 2000, boss: true },
   silence: { hp: 20000, speed: 0.3, dmg: 30, r: 18, xp: 0, pts: 20000, boss: true },
 };
@@ -52,8 +54,13 @@ export interface Enemy {
   /** Knocked back this frame. */
   kx: number;
   ky: number;
-  /** Inside the PAD's chord: slowed. */
+  /** Inside the PAD's chord, or hit by a part locked with the BASS: slowed. */
   slow: boolean;
+  /** Frames left slowed by a WEIGHT hit, and stopped by a STUN hit. */
+  slowT: number;
+  stun: number;
+  /** A MUTE: the part it silences while near you. */
+  mute?: InstId;
   /** Facing left. */
   flip: boolean;
 }
@@ -77,6 +84,26 @@ export interface Shot {
   target: number;
   /** An echo: drawn fainter. */
   echo: boolean;
+  /** What a hit does besides damage, from a lock. */
+  fx: HitFx | null;
+}
+
+/** Stun and slow from a lock, in frames. */
+export interface HitFx {
+  stun: number;
+  slow: number;
+}
+
+/** A shot to play again later: an ECHO, or a lock with the HATS. */
+interface Echo {
+  at: number;
+  id: InstId;
+  lv: number;
+  k: number;
+  n: number;
+  /** The step it echoes, for the synth's pitch. */
+  step: number;
+  traits: Trait[];
 }
 
 export type BulletKind = 'tomato' | 'shock' | 'rest';
@@ -161,7 +188,8 @@ export type Card =
   | { kind: 'inst'; id: InstId; lv: number }
   | { kind: 'gear'; id: GearId; lv: number }
   | { kind: 'tea' }
-  | { kind: 'tips' };
+  | { kind: 'tips' }
+  | { kind: 'arrange' };
 
 export type Mode = 'set' | 'endless';
 
@@ -193,10 +221,19 @@ const SPAWN_R = 178;
 /** Echoes come a dotted eighth late. */
 const ECHO_STEPS = 3;
 const ECHO_VOL = [0, 0.3, 0.45, 0.6];
+/** Steps a REARRANGE card lets you move. */
+export const ARRANGE_MOVES = 2;
+/** How near a MUTE has to be to silence its part. */
+export const MUTE_R = 120;
 const GRID = 24;
 /** How the Hush toughen by the minute. */
 export let HP_LINEAR = 1.0;
 export let HP_SQUARE = 0.25;
+/** Seconds between MUTEs; the playtests can change it (0: none). */
+export let MUTE_EVERY = 45;
+export function tuneMutes(sec: number) {
+  MUTE_EVERY = sec;
+}
 export function tune(lin: number, sq: number) {
   HP_LINEAR = lin;
   HP_SQUARE = sq;
@@ -237,8 +274,14 @@ export class World {
   private stepClock = 0;
   /** ARP orbit angle. */
   orbit = 0;
-  /** Shots waiting to echo: [step to fire on, instrument, level, damage scale]. */
-  private echoes: [number, InstId, number, number][] = [];
+  /** Shots waiting to play again. */
+  private echoes: Echo[] = [];
+  /** Steps moved on the sequencer, per part, in the order made: [from, to]. Replayed on every level's pattern. */
+  moves: Partial<Record<InstId, [number, number][]>> = {};
+  /** Steps still to move, after a REARRANGE card. */
+  movesLeft = 0;
+  /** Hit effects of the shot being fired. */
+  private hitFx: HitFx | null = null;
   notes: NoteEvent[] = [];
   /** Sounds this frame, for the synth. */
   sounds: string[] = [];
@@ -290,6 +333,57 @@ export class World {
     return this.gear.find((s) => s.id === id)?.lv ?? 0;
   }
 
+  // ---------- the sequencer ----------
+
+  /** The steps of a bar a part plays, each with the step it was moved from (itself if it wasn't). */
+  pattern(id: InstId, lv = this.instLevel(id)): Map<number, number> {
+    const out = new Map(basePattern(id, lv).map((k) => [k, k] as [number, number]));
+    for (const [from, to] of this.moves[id] ?? []) {
+      const o = out.get(from);
+      if (o === undefined || out.has(to)) continue;
+      out.delete(from);
+      out.set(to, o);
+    }
+    return out;
+  }
+
+  /** Every part you hold that you can rearrange, with its pattern. */
+  patterns(): Map<InstId, Map<number, number>> {
+    return new Map(this.instruments.filter((s) => editable(s.id)).map((s) => [s.id, this.pattern(s.id, s.lv)]));
+  }
+
+  /** Whether a part plays on a step of the run (any part: the LEAD and CRASH go by the song). */
+  plays(id: InstId, lv: number, step: number) {
+    return editable(id) ? this.pattern(id, lv).has(step % STEPS) : shots(id, lv, step, this.song) > 0;
+  }
+
+  /** Moves a step of a part to an empty one of its row. */
+  moveStep(id: InstId, from: number, to: number) {
+    const p = this.pattern(id);
+    if (!p.has(from) || p.has(to) || this.movesLeft <= 0) return false;
+    (this.moves[id] ??= []).push([from, to]);
+    this.movesLeft--;
+    return true;
+  }
+
+  /** For ?debug: a MUTE comes now. */
+  debugMute() {
+    this.spawn('mute', ...this.offscreen());
+  }
+
+  /** The parts the MUTEs near you silence. */
+  muted(): Set<InstId> {
+    const out = new Set<InstId>();
+    for (const e of this.enemies)
+      if (e.mute && e.hp > 0 && Math.hypot(e.x - this.px, e.y - this.py) < MUTE_R) out.add(e.mute);
+    return out;
+  }
+
+  /** On a step of the bar: the traits each part gets from its locks. */
+  locksAt(bar: number, pats = this.patterns(), muted = this.muted()): Map<InstId, Trait[]> {
+    return lockMap(pats, bar, muted);
+  }
+
   get dmgMult() {
     return 1 + 0.15 * this.gearLevel('amp');
   }
@@ -336,6 +430,7 @@ export class World {
       for (const d of INSTRUMENTS) if (!this.instLevel(d.id)) pool.push([{ kind: 'inst', id: d.id, lv: 1 }, 1]);
     for (const s of this.gear) if (s.lv < GEARS[s.id].max) pool.push([{ kind: 'gear', id: s.id, lv: s.lv + 1 }, 1]);
     if (this.gear.length < MAX_GEAR) for (const d of GEAR) if (!this.gearLevel(d.id)) pool.push([{ kind: 'gear', id: d.id, lv: 1 }, 0.8]);
+    if (this.instruments.filter((s) => editable(s.id)).length >= 2) pool.push([{ kind: 'arrange' }, 0.9]);
     const out: Card[] = [];
     while (out.length < 3 && pool.length) {
       const total = pool.reduce((a, [, w]) => a + w, 0);
@@ -364,6 +459,7 @@ export class World {
       }
       if (c.id === 'encore') this.revives++;
     } else if (c.kind === 'tea') this.hp = Math.min(this.maxHp, this.hp + 50);
+    else if (c.kind === 'arrange') this.movesLeft += ARRANGE_MOVES;
     else this.addScore(1000);
   }
 
@@ -418,32 +514,59 @@ export class World {
     if (++this.stepClock < this.stepFrames && this.step >= 0) return;
     this.stepClock = 0;
     this.step++;
+    const bar = this.step % STEPS;
+    const pats = this.patterns();
+    const muted = this.muted();
+    const locks = lockMap(pats, bar, muted);
+    const echo = this.gearLevel('echo');
     for (const s of this.instruments) {
-      const n = shots(s.id, s.lv, this.step, this.song);
+      // A MUTE near you: that part sits out.
+      if (muted.has(s.id)) continue;
+      const pat = pats.get(s.id);
+      const n = pat ? (pat.has(bar) ? 1 : 0) : shots(s.id, s.lv, this.step, this.song);
       if (!n) continue;
-      const vol = accent(s.id, this.step);
+      // A moved step keeps the accent of the step it came from.
+      const vol = accent(s.id, pat?.get(bar) ?? bar);
       this.notes.push({ inst: s.id, step: this.step, lv: s.lv, count: n, vol });
       if (!fire) continue;
-      this.fire(s.id, s.lv, n, vol < 1 ? 0.7 : 1);
-      const echo = this.gearLevel('echo');
-      if (echo && s.id !== 'crash') this.echoes.push([this.step + ECHO_STEPS, s.id, s.lv, ECHO_VOL[echo]]);
+      const traits = locks.get(s.id) ?? [];
+      this.fire(s.id, s.lv, n, vol < 1 ? 0.7 : 1, false, traits);
+      const rest = traits.filter((t) => t !== 'double');
+      if (rest.length < traits.length) this.echoes.push({ at: this.step + 1, id: s.id, lv: s.lv, k: 0.6, n, step: this.step, traits: rest });
+      if (echo && s.id !== 'crash') this.echoes.push({ at: this.step + ECHO_STEPS, id: s.id, lv: s.lv, k: ECHO_VOL[echo], n, step: this.step, traits: rest });
     }
-    const due = this.echoes.filter((e) => e[0] <= this.step);
-    if (due.length) this.echoes = this.echoes.filter((e) => e[0] > this.step);
-    for (const [, id, lv, k] of due) {
-      if (!this.instLevel(id)) continue;
-      const n = Math.max(1, shots(id, lv, this.step - ECHO_STEPS, this.song));
-      this.notes.push({ inst: id, step: this.step - ECHO_STEPS, lv, count: n, vol: k });
-      if (fire) this.fire(id, lv, n, k, true);
+    const due = this.echoes.filter((e) => e.at <= this.step);
+    if (due.length) this.echoes = this.echoes.filter((e) => e.at > this.step);
+    for (const e of due) {
+      if (!this.instLevel(e.id) || muted.has(e.id)) continue;
+      this.notes.push({ inst: e.id, step: e.step, lv: e.lv, count: e.n, vol: e.k });
+      if (fire) this.fire(e.id, e.lv, e.n, e.k, true, e.traits);
     }
   }
 
   // ---------- the band ----------
 
-  private fire(id: InstId, lv: number, n: number, scale: number, echo = false) {
+  private fire(id: InstId, lv: number, n: number, scale: number, echo = false, traits: Trait[] = []) {
     const st = stats(id, lv);
-    const dmg = st.dmg * this.dmgMult * scale;
-    const area = st.area * this.areaMult;
+    const has = (t: Trait) => traits.includes(t);
+    // Locks: PUNCH hits harder, WIDE is bigger, STUN and WEIGHT stop and slow what they hit.
+    const dmg = st.dmg * this.dmgMult * scale * (has('punch') ? 1.5 : 1);
+    const wide = has('wide') ? 1.5 : 1;
+    const area = st.area * this.areaMult * wide;
+    st.area *= wide;
+    this.hitFx = has('stun') || has('weight') ? { stun: has('stun') ? 40 : 0, slow: has('weight') ? 90 : 0 } : null;
+    if (has('warmth')) this.warmth();
+    this.fireAs(id, st, n, dmg, area, wide, echo);
+    this.hitFx = null;
+  }
+
+  /** WARMTH: notes nearby come to you, and a little health. */
+  private warmth() {
+    for (const g of this.gems) if ((g.x - this.px) ** 2 + (g.y - this.py) ** 2 < 90 * 90) g.pulled = true;
+    this.hp = Math.min(this.maxHp, this.hp + 1);
+  }
+
+  private fireAs(id: InstId, st: ReturnType<typeof stats>, n: number, dmg: number, area: number, wide: number, echo: boolean) {
     const { px, py } = this;
     switch (id) {
       case 'kick': {
@@ -484,7 +607,7 @@ export class World {
       }
       case 'arp': {
         const r = area;
-        const reach = 9 * this.areaMult;
+        const reach = 9 * this.areaMult * wide;
         for (let k = 0; k < st.count; k++) {
           const a = this.orbit + (k * Math.PI * 2) / st.count;
           const ox = px + Math.cos(a) * r, oy = py + Math.sin(a) * r;
@@ -517,7 +640,7 @@ export class World {
   private shoot(inst: InstId, kind: ShotKind, a: number, speed: number, dmg: number, r: number, life: number, pierce: number, echo: boolean) {
     const s: Shot = {
       inst, kind, x: this.px, y: this.py, vx: Math.cos(a) * speed, vy: Math.sin(a) * speed,
-      dmg, r, life, pierce, hit: new Set(), target: -1, echo,
+      dmg, r, life, pierce, hit: new Set(), target: -1, echo, fx: this.hitFx,
     };
     this.shots.push(s);
     return s;
@@ -572,10 +695,11 @@ export class World {
     return out;
   }
 
+  /** The nearest enemies in range; MUTEs first, so the aimed parts go for them. */
   private nearest(x: number, y: number, n: number, range: number): Enemy[] {
     return this.enemies
       .filter((e) => e.hp > 0 && Math.abs(e.x - x) < range && Math.abs(e.y - y) < range)
-      .map((e) => [e, (e.x - x) ** 2 + (e.y - y) ** 2] as const)
+      .map((e) => [e, (e.x - x) ** 2 + (e.y - y) ** 2 - (e.mute ? 1e6 : 0)] as const)
       .sort((a, b) => a[1] - b[1])
       .slice(0, n)
       .map(([e]) => e);
@@ -589,11 +713,21 @@ export class World {
     const hp = Math.round(d.hp * scale);
     const e: Enemy = {
       id: this.nextId++, kind, x, y, hp, maxHp: hp, r: d.r, speed: d.speed * (d.boss ? 1 : 1 + Math.min(0.3, m * 0.02)),
-      dmg: d.dmg, flash: 0, t: Math.floor(this.rng() * 120), mode: 0, dx: 0, dy: 0, kx: 0, ky: 0, slow: false, flip: false,
+      dmg: d.dmg, flash: 0, t: Math.floor(this.rng() * 120), mode: 0, dx: 0, dy: 0, kx: 0, ky: 0, slow: false, slowT: 0, stun: 0, flip: false,
     };
+    if (kind === 'mute') e.mute = this.muteTarget();
     this.enemies.push(e);
     if (d.boss) this.boss = e;
     return e;
+  }
+
+  /** The part a new MUTE goes for: your best, mostly, and not one already muted. */
+  private muteTarget(): InstId {
+    const taken = new Set(this.enemies.map((e) => e.mute));
+    const free = this.instruments.filter((s) => !taken.has(s.id));
+    const pool = free.length ? free : this.instruments;
+    let r = this.rng() * pool.reduce((a, s) => a + s.lv, 0);
+    return (pool.find((s) => (r -= s.lv) < 0) ?? pool[0]).id;
   }
 
   /** A point just off screen, in a random direction (or that one). */
@@ -653,6 +787,9 @@ export class World {
         this.spawn(kind, this.px + Math.cos(a) * 150, this.py + Math.sin(a) * 120);
       }
     };
+    // A MUTE every so often from minute three, never more than two, once you have a band to spare a part of.
+    if (MUTE_EVERY && t >= 180 && !this.boss?.kind.startsWith('silence') && this.frames % (MUTE_EVERY * 60) === 0)
+      if (this.instruments.length >= 3 && this.enemies.filter((e) => e.mute).length < 2) this.spawn('mute', ...this.offscreen());
     once('n1', 180, neighbor(1));
     once('r1', 270, ring('shh', 28));
     once('n2', 360, neighbor(1));
@@ -689,7 +826,8 @@ export class World {
       const d = Math.hypot(dx, dy) || 1;
       dx /= d;
       dy /= d;
-      e.slow = pad > 0 && d < pad + e.r;
+      if (e.slowT > 0) e.slowT--;
+      e.slow = (pad > 0 && d < pad + e.r) || e.slowT > 0;
       let sp = e.speed * (e.slow ? 0.55 : 1);
       e.t++;
       // Far behind: round in front again.
@@ -711,6 +849,21 @@ export class World {
           if (e.t % 160 === 0 && d < 150) {
             this.bullet('tomato', e.x, e.y, Math.atan2(this.py - e.y, this.px - e.x), 1.5, 3, 9);
             this.sounds.push('throw');
+          }
+          break;
+        case 'mute':
+          // Hangs about just out of reach, circling, and silences one of your parts while near.
+          if (d < 55) sp *= -0.5;
+          else if (d < 85) sp *= 0.3;
+          {
+            const turn = e.id % 2 ? 0.7 : -0.7, ox = dx;
+            dx -= dy * turn;
+            dy += ox * turn;
+          }
+          if (e.mode === 0 && d < MUTE_R && e.mute) {
+            e.mode = 1;
+            this.popup(`${INST[e.mute].name} MUTED`, INST[e.mute].color);
+            this.sounds.push('warning');
           }
           break;
         case 'feedback':
@@ -749,6 +902,7 @@ export class World {
           this.stepSilence(e);
           break;
       }
+      if (e.stun > 0) (e.stun--, (sp = 0));
       const len = Math.hypot(dx, dy) || 1;
       e.x += (dx / len) * sp + e.kx;
       e.y += (dy / len) * sp + e.ky;
@@ -806,8 +960,13 @@ export class World {
   }
 
   /** Damage, a white flash and a shove; at zero the enemy bursts into notes. */
-  private hurt(e: Enemy, dmg: number, knock: number, src?: InstId) {
+  private hurt(e: Enemy, dmg: number, knock: number, src?: InstId, fx = this.hitFx) {
     if (e.hp <= 0) return;
+    if (fx) {
+      // Bosses shrug off a STUN, but not the WEIGHT.
+      if (!KINDS[e.kind].boss) e.stun = Math.max(e.stun, fx.stun);
+      e.slowT = Math.max(e.slowT, fx.slow);
+    }
     if (src) this.dealt[src] = (this.dealt[src] ?? 0) + Math.min(dmg, e.hp);
     e.hp -= dmg;
     e.flash = 5;
@@ -887,7 +1046,7 @@ export class World {
       for (const e of this.near(s.x, s.y, s.r + 12)) {
         if (s.hit.has(e.id) || Math.hypot(e.x - s.x, e.y - s.y) > s.r + e.r) continue;
         s.hit.add(e.id);
-        this.hurt(e, s.dmg, s.kind === 'wave' ? 2 : 1, s.inst);
+        this.hurt(e, s.dmg, s.kind === 'wave' ? 2 : 1, s.inst, s.fx);
         if (s.hit.size >= s.pierce) {
           s.life = 0;
           break;
@@ -1072,6 +1231,14 @@ export function autopilot(w: World): Controls {
     const d2 = (p.x - w.px) ** 2 + (p.y - w.py) ** 2;
     if (d2 < 200 * 200) (gx = p.x - w.px), (gy = p.y - w.py);
   }
+  // A MUTE silencing a part: go and get it while healthy enough.
+  if (w.hp > w.maxHp * 0.4) {
+    let best = MUTE_R * MUTE_R;
+    for (const e of w.enemies) {
+      const d2 = (e.x - w.px) ** 2 + (e.y - w.py) ** 2;
+      if (e.mute && d2 < best) (best = d2), (gx = e.x - w.px), (gy = e.y - w.py);
+    }
+  }
   const gl = Math.hypot(gx, gy);
   let dx = ax * 40, dy = ay * 40;
   // Notes pull less the more danger it is in, but never stop pulling, or a close-range band never levels.
@@ -1109,7 +1276,77 @@ export function pickCard(w: World, cards: Card[]): Card {
         return 60 * hurt;
       case 'tips':
         return 1;
+      case 'arrange':
+        // Worth more the more parts there are to lock.
+        return 8 * w.instruments.filter((s) => editable(s.id)).length - 6;
     }
   };
   return cards.reduce((a, b) => (value(b) > value(a) ? b : a));
+}
+
+/** On a step of the bar: the traits each part gets from its locks (a moved step on another part's step). */
+export function lockMap(pats: Map<InstId, Map<number, number>>, bar: number, muted: Set<InstId>): Map<InstId, Trait[]> {
+  const out = new Map<InstId, Trait[]>();
+  const on = [...pats].filter(([id, p]) => p.has(bar) && !muted.has(id));
+  const add = (id: InstId, t: Trait) => {
+    const list = out.get(id) ?? [];
+    if (!list.includes(t)) list.push(t);
+    out.set(id, list);
+  };
+  for (const [a, pa] of on) {
+    if (pa.get(bar) === bar) continue;
+    for (const [b] of on)
+      if (b !== a) {
+        add(a, TRAITS[b]!.trait);
+        add(b, TRAITS[a]!.trait);
+      }
+  }
+  return out;
+}
+
+/** What a trait is worth to the playtest busker, by who gets it. */
+function traitValue(w: World, id: InstId, t: Trait) {
+  switch (t) {
+    case 'punch': return 3;
+    case 'double': return 3;
+    case 'wide': return id === 'kick' || id === 'pad' || id === 'arp' || id === 'bass' ? 3 : 1;
+    case 'stun': return 2;
+    case 'weight': return 2;
+    case 'warmth': return w.hp < w.maxHp * 0.6 ? 3 : 1.5;
+  }
+}
+
+function lockValue(w: World, pats: Map<InstId, Map<number, number>>) {
+  let v = 0;
+  const none = new Set<InstId>();
+  for (let bar = 0; bar < STEPS; bar++) for (const [id, ts] of lockMap(pats, bar, none)) for (const t of ts) v += traitValue(w, id, t);
+  return v;
+}
+
+/** The playtest busker (and the title demo) rearranging: each move the one that gains the most from locks. */
+export function autoArrange(w: World) {
+  while (w.movesLeft > 0) {
+    const base = lockValue(w, w.patterns());
+    let best: [InstId, number, number] | null = null, gain = 0;
+    for (const id of EDITABLE) {
+      if (!w.instLevel(id)) continue;
+      const pat = w.pattern(id);
+      for (const from of pat.keys())
+        for (let to = 0; to < STEPS; to++) {
+          if (pat.has(to)) continue;
+          const pats = w.patterns();
+          const p = new Map(pat);
+          p.set(to, p.get(from)!);
+          p.delete(from);
+          pats.set(id, p);
+          const g = lockValue(w, pats) - base;
+          if (g > gain) (gain = g), (best = [id, from, to]);
+        }
+    }
+    if (!best) {
+      w.movesLeft = 0;
+      return;
+    }
+    w.moveStep(...best);
+  }
 }
